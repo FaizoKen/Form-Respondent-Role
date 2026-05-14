@@ -69,6 +69,14 @@ jobs:
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # RUSTSEC-2023-0071: Marvin Attack timing side-channel in `rsa`.
+          # Pulled in transitively by sqlx-macros-core (which unconditionally
+          # depends on sqlx-mysql for SQL parsing in query! macros), not by
+          # our runtime code — we only enable sqlx's `postgres` feature, so
+          # MySQL handshake / RSA crypto is never executed. No upstream fix
+          # is available from the rsa crate. Revisit when sqlx 0.9 ships or
+          # rsa publishes a constant-time release.
+          ignore: RUSTSEC-2023-0071
 
   docker:
     name: docker build
