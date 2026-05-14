@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -327,11 +328,20 @@ async fn main() {
     });
 
     let mut server_shutdown = shutdown.subscribe();
-    if let Err(e) = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            server_shutdown.wait().await;
-        })
-        .await
+    // `into_make_service_with_connect_info::<SocketAddr>()` is required for
+    // `SmartIpKeyExtractor` to fall back to the peer address when the request
+    // has no `X-Forwarded-For` / `Forwarded` / `X-Real-IP` header (e.g. the
+    // RoleLogic API calls us directly over the LAN via `PLUGIN_URL_MAP`).
+    // Without it the rate-limiter rejects every direct call with
+    // `500 Unable to extract key!`.
+    if let Err(e) = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        server_shutdown.wait().await;
+    })
+    .await
     {
         tracing::error!("Server error: {e}");
     }
