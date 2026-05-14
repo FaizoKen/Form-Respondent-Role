@@ -251,6 +251,61 @@ select {
 #conds { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px dashed var(--border); }
 #conds.shown { display: block; animation: fadeIn 200ms var(--ease); }
 .cond-list { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+
+/* Empty-conditions state */
+.cond-empty {
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+.cond-empty .ce-msg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-soft);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.cond-empty .ce-msg svg { flex: 0 0 16px; color: var(--brand); }
+.cond-empty .ce-msg strong { color: var(--text); font-weight: 600; }
+.cond-empty .ce-divider { height: 1px; background: var(--border); margin: 14px 0 12px; }
+.cond-empty .ce-label {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.cond-empty ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.cond-empty li {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding-left: 14px;
+  position: relative;
+}
+.cond-empty li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.cond-empty code {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 .cond {
   display: grid;
   grid-template-columns: 1.2fr 1fr 1.6fr auto;
@@ -553,14 +608,18 @@ select {
       </div>
 
       <div id="conds">
-        <div id="cond-empty" class="info" style="display:none;">
-          <p style="margin-bottom: 6px;">No conditions yet &mdash; click <strong style="margin:0 4px;">+ Add condition</strong> below to start.</p>
-          <p style="color: var(--text-dim); font-size: 13px; line-height: 1.55;">
-            <strong>Examples</strong>
-            <span style="display:block; margin-top: 4px;">&bull; <em>&ldquo;Age&rdquo;</em> <em>&ge;</em> <em>18</em> &mdash; gate by self-reported age</span>
-            <span style="display:block;">&bull; <em>&ldquo;Region&rdquo;</em> <em>is one of</em> <em>EU, UK</em> &mdash; gate by region</span>
-            <span style="display:block;">&bull; <em>&ldquo;Quiz total score&rdquo;</em> <em>&ge;</em> <em>8</em> &mdash; gate quiz forms by score</span>
-          </p>
+        <div id="cond-empty" class="cond-empty" style="display:none;">
+          <div class="ce-msg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <span>No conditions yet &mdash; click <strong>+ Add condition</strong> below to start.</span>
+          </div>
+          <div class="ce-divider"></div>
+          <div class="ce-label">Examples</div>
+          <ul>
+            <li><code>Age</code> &ge; <code>18</code> &mdash; gate by self-reported age</li>
+            <li><code>Region</code> is one of <code>EU</code>, <code>UK</code> &mdash; gate by region</li>
+            <li><code>Quiz total score</code> &ge; <code>8</code> &mdash; gate quiz forms by score</li>
+          </ul>
         </div>
         <div class="cond-list" id="cond-list"></div>
         <button class="btn btn-sec" id="add-cond" type="button">
@@ -932,7 +991,7 @@ function renderConditions() {
   const conds = state.config.conditions || [];
 
   if (state.config.mode === 'conditions' && conds.length === 0) {
-    empty.style.display = 'flex';
+    empty.style.display = 'block';
   } else {
     empty.style.display = 'none';
   }
