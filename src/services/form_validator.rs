@@ -415,13 +415,11 @@ fn check_question_kind(q: &Question, errors: &mut Vec<String>) {
                 }
             }
         }
-        QuestionKind::Agreement => {
-            if !q.required {
-                errors.push(format!(
-                    "Agreement question \"{}\" must be marked required.",
-                    q.id
-                ));
-            }
+        QuestionKind::Agreement if !q.required => {
+            errors.push(format!(
+                "Agreement question \"{}\" must be marked required.",
+                q.id
+            ));
         }
         QuestionKind::Image => {
             let url = q.image_url.as_deref().unwrap_or("").trim();
