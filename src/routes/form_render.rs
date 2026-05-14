@@ -478,10 +478,7 @@ pub async fn get_done(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Same `__BASE_URL__` substitution pattern as render/builder/etc. so the
     // favicon resolves under the plugin's path prefix in every deployment.
     let body = DONE_HTML.replace("__BASE_URL__", &state.config.base_url);
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        body,
-    )
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], body)
 }
 
 const DONE_HTML: &str = include_str!("../../templates/done.html");
