@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Forms — Admin</title>
+<link rel="icon" href="__BASE_URL__/favicon.ico" type="image/x-icon">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="color-scheme" content="dark">
+<style>
+:root {
+  --bg: #0a0e1a;
+  --bg-2: #0f1422;
+  --surface: #131a2c;
+  --surface-2: #1a2236;
+  --surface-3: #232c44;
+  --border: #1f2940;
+  --border-strong: #2c3a55;
+  --text: #e6e8ee;
+  --text-soft: #c8d0dc;
+  --text-dim: #94a0b3;
+  --text-faint: #8b95a8;
+  --brand: #8b7cff;
+  --brand-strong: #7c6bff;
+  --primary: #6366f1;
+  --primary-hover: #5458e0;
+  --danger: #ef4444;
+  --danger-bg: #1d0d11;
+  --danger-border: #6b1d22;
+  --danger-text: #fca5a5;
+  --warn-bg: #2a1a08;
+  --warn-text: #fcd34d;
+  --warn-border: #7c4a16;
+  --success-bg: #07261b;
+  --success-text: #86efac;
+  --success-border: #195e3e;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --shadow: 0 8px 24px rgba(0,0,0,0.4);
+  --shadow-lg: 0 20px 50px rgba(0,0,0,0.55);
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+*:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--radius-sm); }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  background:
+    radial-gradient(1000px 500px at 90% -10%, rgba(139, 124, 255, 0.06), transparent 60%),
+    var(--bg);
+  color: var(--text-soft);
+  min-height: 100vh;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #3a4a6b; background-clip: content-box; border: 2px solid transparent; }
+
+.shell { max-width: 960px; margin: 0 auto; padding: 32px 20px 80px; }
+
+header.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+.page-head .title-block { min-width: 0; }
+.page-head h1 {
+  color: var(--text);
+  font-size: clamp(22px, 3vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.page-head .sub {
+  color: var(--text-dim);
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: var(--primary);
+  color: white;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--ease), transform var(--ease), box-shadow var(--ease), border-color var(--ease);
+  min-height: 40px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.25);
+}
+.btn:hover:not(:disabled) { background: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(99, 102, 241, 0.3); }
+.btn:active:not(:disabled) { transform: translateY(0); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-sec {
+  background: var(--surface);
+  color: var(--text-soft);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+.btn-sec:hover:not(:disabled) { background: var(--surface-2); border-color: #3b4a6c; transform: none; box-shadow: none; color: var(--text); }
+.btn-danger { background: var(--danger); border-color: transparent; box-shadow: 0 2px 6px rgba(239, 68, 68, 0.25); }
+.btn-danger:hover:not(:disabled) { background: #dc2626; box-shadow: 0 6px 16px rgba(239, 68, 68, 0.3); }
+.btn-danger:disabled { background: rgba(239, 68, 68, 0.25); color: var(--text-dim); }
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  width: 36px; height: 36px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  cursor: pointer;
+  transition: all var(--ease);
+}
+.btn-icon:hover { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
+.btn-icon svg { width: 16px; height: 16px; }
+
+/* Server settings panel — Respondent list access (server-wide, applies
+   to every form in this guild, used to live on each role-config page) */
+.settings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+.settings-card h2 {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-card h2 .saved-pill {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--success-bg);
+  color: var(--success-text);
+  border: 1px solid var(--success-border);
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity var(--ease);
+}
+.settings-card h2 .saved-pill.show { opacity: 1; }
+.settings-card .sub {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 4px 0 14px;
+  line-height: 1.55;
+}
+.settings-card .sub a { color: var(--brand); text-decoration: none; }
+.settings-card .sub a:hover { text-decoration: underline; }
+.access-radio-group { display: flex; flex-direction: column; gap: 8px; }
+.access-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--ease), background var(--ease);
+}
+.access-radio:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.access-radio.selected {
+  border-color: var(--brand);
+  background: rgba(139, 124, 255, 0.10);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+.access-radio input[type="radio"] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+.access-radio .opt-main { flex: 1; min-width: 0; }
+.access-radio strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.access-radio span {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* Card list */
+#list { display: flex; flex-direction: column; gap: 12px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  transition: border-color var(--ease), transform var(--ease), box-shadow var(--ease);
+}
+.card:hover { border-color: var(--border-strong); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.row-main { flex: 1; min-width: 0; }
+.row h3 {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.row .meta {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.meta-dot { color: var(--text-faint); }
+.row a.url {
+  color: var(--brand);
+  text-decoration: none;
+  word-break: break-all;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.row a.url:hover { text-decoration: underline; }
+.row a.url svg { width: 12px; height: 12px; opacity: 0.7; }
+.row-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tag-quiz { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-border); }
+.tag-archived { color: var(--danger-text); background: var(--danger-bg); border-color: var(--danger-border); }
+
+/* Empty / loading / error */
+.empty {
+  text-align: center;
+  padding: 64px 24px;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+.empty-icon {
+  width: 56px; height: 56px;
+  margin: 0 auto 16px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--brand);
+}
+.empty-icon svg { width: 28px; height: 28px; }
+.empty h2 { color: var(--text); font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+.empty p { font-size: 14px; margin-bottom: 18px; line-height: 1.55; max-width: 380px; margin-left: auto; margin-right: auto; }
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 0%, var(--surface-2) 50%, var(--surface) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius);
+  height: 88px;
+}
+.skeleton + .skeleton { margin-top: 12px; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Modal */
+.modal-bg {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 18, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 20px;
+  animation: fadeIn 180ms var(--ease);
+}
+.modal-bg.active { display: flex; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+  animation: modalIn 220ms var(--ease);
+}
+.modal h2 {
+  color: var(--text);
+  margin-bottom: 6px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.modal .modal-sub {
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.55;
+  margin-bottom: 18px;
+}
+.modal h2.danger-title { color: var(--danger-text); }
+
+.tpl-group { display: flex; flex-direction: column; gap: 10px; }
+.tpl {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--ease), background var(--ease), transform var(--ease);
+  text-decoration: none;
+}
+.tpl:hover { border-color: var(--brand); background: var(--surface-2); transform: translateY(-1px); }
+.tpl-icon {
+  flex: 0 0 40px;
+  width: 40px; height: 40px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--brand);
+}
+.tpl-icon svg { width: 20px; height: 20px; }
+.tpl-text { flex: 1; min-width: 0; }
+.tpl strong { display: block; color: var(--text); font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.tpl span { color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+
+.impact {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+.impact-title {
+  color: var(--danger-text);
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.impact ul { margin: 4px 0 0 18px; color: var(--danger-text); font-size: 13px; line-height: 1.7; }
+.impact ul li::marker { color: rgba(252, 165, 165, 0.55); }
+
+.confirm-label {
+  display: block;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  margin-top: 16px;
+  margin-bottom: 6px;
+}
+.confirm-label code {
+  background: var(--bg-2);
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12.5px;
+  border: 1px solid var(--border-strong);
+}
+.confirm-input {
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 14px;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.confirm-input:focus { outline: none; border-color: var(--danger); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.22); }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; flex-wrap: wrap; }
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-border);
+  box-shadow: var(--shadow);
+  z-index: 100;
+  font-size: 14px;
+  max-width: calc(100% - 32px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms var(--ease), transform 220ms var(--ease);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.toast.success { background: var(--success-bg); color: var(--success-text); border-color: var(--success-border); }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalIn { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+@media (max-width: 640px) {
+  .shell { padding: 22px 14px 60px; }
+  .row { flex-direction: column; align-items: stretch; }
+  .row-actions { width: 100%; }
+  .row-actions .btn, .row-actions .btn-sec { flex: 1; }
+  .modal { padding: 22px 18px; }
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions .btn, .modal-actions .btn-sec { width: 100%; }
+  /* Settings card on phones: tighter padding, smaller radio cells so the
+     two access options don't dominate the page above the forms list. */
+  .settings-card { padding: 14px 14px; margin-bottom: 14px; }
+  .settings-card h2 { font-size: 14px; }
+  .settings-card .sub { font-size: 12.5px; margin-bottom: 10px; }
+  .access-radio { padding: 10px 12px; }
+  .access-radio strong { font-size: 13.5px; }
+  .access-radio span { font-size: 12px; }
+  /* Page header: drop the "New form" button to its own row so the long
+     subtitle has room. */
+  header.page-head { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 18px; }
+  header.page-head .btn { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="page-head">
+    <div class="title-block">
+      <h1>Forms</h1>
+      <div class="sub">Create, manage, and review submission forms for this server.</div>
+    </div>
+    <button class="btn" id="new-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New form
+    </button>
+  </header>
+  <div class="settings-card" id="settings-card" style="display:none;">
+    <h2>Respondent list access <span class="saved-pill" id="vp-saved">Saved</span></h2>
+    <div class="sub">Who can view <a id="resp-link" target="_blank" rel="noopener">the respondent list</a> for this server. Applies to every form here.</div>
+    <div class="access-radio-group" id="vp-group">
+      <label class="access-radio" data-vp="managers">
+        <input type="radio" name="vp" value="managers">
+        <div class="opt-main"><strong>Server managers only</strong><span>Default. Only people with Manage Server can see who responded.</span></div>
+      </label>
+      <label class="access-radio" data-vp="members">
+        <input type="radio" name="vp" value="members">
+        <div class="opt-main"><strong>All server members</strong><span>Anyone in the server can view the list.</span></div>
+      </label>
+    </div>
+  </div>
+
+  <div id="list">
+    <div class="skeleton" aria-hidden="true"></div>
+    <div class="skeleton" aria-hidden="true"></div>
+    <div class="skeleton" aria-hidden="true"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-bg" role="dialog" aria-modal="true" aria-labelledby="tpl-h2">
+  <div class="modal">
+    <h2 id="tpl-h2">Start with a template</h2>
+    <div class="modal-sub">Pick a starting point — you can rename, reorder, edit, and delete any question once the form is open.</div>
+    <div class="tpl-group">
+      <a class="tpl" data-tpl="application" role="button" tabindex="0">
+        <div class="tpl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg></div>
+        <div class="tpl-text">
+          <strong>Server-join application</strong>
+          <span>Age check, region, &ldquo;why do you want to join&rdquo;, and a rules-agreement checkbox. Most server applications start here — pair it with a role bound to <em>any submission</em>.</span>
+        </div>
+      </a>
+      <a class="tpl" data-tpl="server_quiz" role="button" tabindex="0">
+        <div class="tpl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+        <div class="tpl-text">
+          <strong>Auto-graded quiz</strong>
+          <span>5 multiple-choice questions with marked correct answers and per-question points. Bind a role with the &ldquo;quiz total score&rdquo; condition (e.g. &ge; 8 out of 10) to gate access by knowledge.</span>
+        </div>
+      </a>
+      <a class="tpl" data-tpl="blank" role="button" tabindex="0">
+        <div class="tpl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+        <div class="tpl-text">
+          <strong>Blank form</strong>
+          <span>Empty form with one page. Pick this when you already know what you want to ask — add questions from the left palette in the builder.</span>
+        </div>
+      </a>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-sec" id="tpl-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="delete-modal-bg" role="dialog" aria-modal="true" aria-labelledby="del-h2">
+  <div class="modal">
+    <h2 class="danger-title" id="del-h2">Delete this form?</h2>
+    <div class="modal-sub">You're about to permanently delete <strong id="del-title"></strong>. This cannot be undone.</div>
+    <div class="impact" id="del-impact"></div>
+    <label class="confirm-label">Type <code id="del-title-echo"></code> to confirm:</label>
+    <input type="text" class="confirm-input" id="del-confirm-input" autocomplete="off" spellcheck="false" autocapitalize="off">
+    <div class="modal-actions">
+      <button class="btn btn-sec" id="del-cancel">Cancel</button>
+      <button class="btn btn-danger" id="del-confirm" disabled>Delete form</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="alert" aria-live="assertive"></div>
+
+<script>
+const BASE = '__BASE_URL__';
+const GUILD = '__GUILD_ID__';
+const ORIGIN = new URL(BASE).origin;
+
+function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
+
+function relTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+  return d.toLocaleDateString();
+}
+
+async function load() {
+  try {
+    const res = await fetch(BASE + '/admin/' + GUILD + '/forms', { credentials: 'include' });
+    if (res.status === 401) {
+      location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname);
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      document.getElementById('list').innerHTML = renderEmpty('Failed to load', escapeHtml(data.error || 'Try refreshing the page.'), false);
+      return;
+    }
+    setupViewPermission(data.view_permission || 'managers');
+    if (!data.forms.length) {
+      document.getElementById('list').innerHTML = renderEmpty('No forms yet', 'Click <strong>New form</strong> to create your first one. You can start from a template or a blank canvas.', true);
+      const cta = document.querySelector('#list [data-empty-cta]');
+      if (cta) cta.onclick = openTemplateModal;
+      return;
+    }
+    document.getElementById('list').innerHTML = data.forms.map(f => `
+      <div class="card"><div class="row">
+        <div class="row-main">
+          <h3>${escapeHtml(f.title)}${f.is_quiz ? '<span class="tag tag-quiz">Quiz</span>' : ''}${f.archived ? '<span class="tag tag-archived">Archived</span>' : ''}</h3>
+          <div class="meta">
+            <span><strong style="color:var(--text-soft);">${f.response_count}</strong> response${f.response_count === 1 ? '' : 's'}</span>
+            <span class="meta-dot">•</span>
+            <span><strong style="color:var(--text-soft);">${f.bound_role_links_count}</strong> role link${f.bound_role_links_count === 1 ? '' : 's'}</span>
+            <span class="meta-dot">•</span>
+            <span title="${new Date(f.updated_at).toLocaleString()}">updated ${relTime(f.updated_at)}</span>
+          </div>
+          <div class="meta" style="margin-top:4px;">
+            <a class="url" href="${BASE}/f/${escapeHtml(f.slug)}" target="_blank" rel="noopener">${BASE}/f/${escapeHtml(f.slug)}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+          </div>
+        </div>
+        <div class="row-actions">
+          <a class="btn btn-sec" href="${BASE}/admin/${GUILD}/forms/${f.id}/responses">Responses</a>
+          <a class="btn" href="${BASE}/admin/${GUILD}/forms/${f.id}">Edit</a>
+          <button class="btn-icon" data-del-form="${f.id}" data-title="${escapeHtml(f.title)}" data-responses="${f.response_count}" data-links="${f.bound_role_links_count}" title="Delete form" aria-label="Delete ${escapeHtml(f.title)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+        </div>
+      </div></div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('list').innerHTML = renderEmpty('Network error', escapeHtml(e.message), false);
+  }
+}
+
+// Server-wide setting: who can view the public respondent list. Each radio
+// click POSTs immediately — there's no "Save" button because there are only
+// two states and the change is reversible. We swap the "Saved" pill in/out
+// for confirmation. Failed saves revert the radio so the UI never claims a
+// state the server didn't accept.
+let viewPermission = null;
+function setupViewPermission(initial) {
+  viewPermission = initial;
+  document.getElementById('settings-card').style.display = 'block';
+  document.getElementById('resp-link').href = BASE + '/respondents/' + GUILD;
+  document.querySelectorAll('.access-radio').forEach(el => {
+    const v = el.dataset.vp;
+    el.classList.toggle('selected', v === viewPermission);
+    el.querySelector('input').checked = (v === viewPermission);
+    el.onclick = (e) => {
+      // Stop the synthetic click from the inner <input> from firing twice.
+      if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') e.preventDefault();
+      if (v === viewPermission) return;
+      saveViewPermission(v);
+    };
+  });
+}
+
+async function saveViewPermission(next) {
+  const prev = viewPermission;
+  viewPermission = next;
+  document.querySelectorAll('.access-radio').forEach(el => {
+    const v = el.dataset.vp;
+    el.classList.toggle('selected', v === next);
+    el.querySelector('input').checked = (v === next);
+  });
+  try {
+    const res = await fetch(BASE + '/admin/' + GUILD + '/view-permission', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ view_permission: next }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      viewPermission = prev;
+      document.querySelectorAll('.access-radio').forEach(el => {
+        const v = el.dataset.vp;
+        el.classList.toggle('selected', v === prev);
+        el.querySelector('input').checked = (v === prev);
+      });
+      showToast(data.error || 'Failed to update access setting.');
+      return;
+    }
+    const pill = document.getElementById('vp-saved');
+    pill.classList.add('show');
+    clearTimeout(saveViewPermission._t);
+    saveViewPermission._t = setTimeout(() => pill.classList.remove('show'), 2200);
+  } catch (e) {
+    viewPermission = prev;
+    showToast(e.message);
+  }
+}
+
+function renderEmpty(title, body, withCta) {
+  return `
+    <div class="empty">
+      <div class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg></div>
+      <h2>${escapeHtml(title)}</h2>
+      <p>${body}</p>
+      ${withCta ? '<button class="btn" data-empty-cta type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Create your first form</button>' : ''}
+    </div>
+  `;
+}
+
+function showToast(msg, kind) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (kind ? ' ' + kind : '');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => { t.className = 'toast' + (kind ? ' ' + kind : ''); }, 3800);
+}
+
+function openTemplateModal() { document.getElementById('modal-bg').classList.add('active'); }
+function closeTemplateModal() { document.getElementById('modal-bg').classList.remove('active'); }
+
+document.getElementById('new-btn').onclick = openTemplateModal;
+document.getElementById('tpl-cancel').onclick = closeTemplateModal;
+document.getElementById('modal-bg').onclick = (e) => { if (e.target.id === 'modal-bg') closeTemplateModal(); };
+
+document.querySelectorAll('.tpl').forEach(el => {
+  const handler = async () => {
+    const tpl = el.dataset.tpl;
+    try {
+      const res = await fetch(BASE + '/admin/' + GUILD + '/forms', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template: tpl }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Failed to create form'); return; }
+      location.href = BASE + '/admin/' + GUILD + '/forms/' + data.id;
+    } catch (e) { showToast(e.message); }
+  };
+  el.onclick = handler;
+  el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } };
+});
+
+// Delete-form flow. Safety: requires typing the form title to enable the
+// destructive button, and shows responses + role-link impact up front. The
+// backend already unbinds linked roles (so syncing keeps working) and deletes
+// the form's responses inside a transaction — see routes::admin::delete_form.
+let pendingDelete = null;
+
+document.getElementById('list').addEventListener('click', e => {
+  const btn = e.target.closest('[data-del-form]');
+  if (!btn) return;
+  pendingDelete = {
+    id: btn.dataset.delForm,
+    title: btn.dataset.title,
+    responses: parseInt(btn.dataset.responses, 10) || 0,
+    links: parseInt(btn.dataset.links, 10) || 0,
+  };
+  openDeleteModal();
+});
+
+function openDeleteModal() {
+  document.getElementById('del-title').textContent = pendingDelete.title;
+  document.getElementById('del-title-echo').textContent = pendingDelete.title;
+  const impactItems = [];
+  if (pendingDelete.responses > 0) {
+    impactItems.push(`<strong>${pendingDelete.responses}</strong> submitted response${pendingDelete.responses === 1 ? '' : 's'} will be permanently deleted.`);
+  }
+  if (pendingDelete.links > 0) {
+    impactItems.push(`<strong>${pendingDelete.links}</strong> role${pendingDelete.links === 1 ? '' : 's'} currently bound to this form will be unbound. Those roles will stop being granted until you point them at a different form.`);
+  }
+  if (impactItems.length === 0) {
+    impactItems.push('No responses or role links are tied to this form.');
+  }
+  document.getElementById('del-impact').innerHTML = '<div class="impact-title">What will happen</div><ul>' + impactItems.map(s => '<li>' + s + '</li>').join('') + '</ul>';
+  const input = document.getElementById('del-confirm-input');
+  input.value = '';
+  const confirmBtn = document.getElementById('del-confirm');
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Delete form';
+  document.getElementById('delete-modal-bg').classList.add('active');
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeDeleteModal() {
+  document.getElementById('delete-modal-bg').classList.remove('active');
+  pendingDelete = null;
+}
+
+document.getElementById('del-confirm-input').addEventListener('input', e => {
+  document.getElementById('del-confirm').disabled =
+    !pendingDelete || e.target.value.trim() !== pendingDelete.title.trim();
+});
+
+document.getElementById('del-cancel').onclick = closeDeleteModal;
+document.getElementById('delete-modal-bg').onclick = e => {
+  if (e.target.id === 'delete-modal-bg') closeDeleteModal();
+};
+
+document.getElementById('del-confirm').onclick = async () => {
+  if (!pendingDelete) return;
+  const btn = document.getElementById('del-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  try {
+    const res = await fetch(BASE + '/admin/' + GUILD + '/forms/' + pendingDelete.id, {
+      method: 'DELETE', credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(data.error || ('Delete failed (' + res.status + ')'));
+      btn.disabled = false;
+      btn.textContent = 'Delete form';
+      return;
+    }
+    closeDeleteModal();
+    showToast('Form deleted', 'success');
+    load();
+  } catch (e) {
+    showToast(e.message);
+    btn.disabled = false;
+    btn.textContent = 'Delete form';
+  }
+};
+
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('delete-modal-bg').classList.contains('active')) closeDeleteModal();
+    else if (document.getElementById('modal-bg').classList.contains('active')) closeTemplateModal();
+  }
+});
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Responses</title>
+<link rel="icon" href="__BASE_URL__/favicon.ico" type="image/x-icon">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="color-scheme" content="dark">
+<style>
+:root {
+  --bg: #0a0e1a;
+  --bg-2: #0f1422;
+  --surface: #131a2c;
+  --surface-2: #1a2236;
+  --border: #1f2940;
+  --border-strong: #2c3a55;
+  --text: #e6e8ee;
+  --text-soft: #c8d0dc;
+  --text-dim: #94a0b3;
+  --text-faint: #8b95a8;
+  --brand: #8b7cff;
+  --brand-strong: #7c6bff;
+  --primary: #6366f1;
+  --primary-hover: #5458e0;
+  --warn-text: #fbbf24;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 8px 24px rgba(0,0,0,0.4);
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+*:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--radius-sm); }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(139, 124, 255, 0.05), transparent 60%),
+    var(--bg);
+  color: var(--text-soft);
+  min-height: 100vh;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #3a4a6b; background-clip: content-box; border: 2px solid transparent; }
+
+.shell { max-width: 1140px; margin: 0 auto; padding: 28px 20px 80px; }
+
+header.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.title-block { min-width: 0; flex: 1; }
+.page-head h1 {
+  color: var(--text);
+  font-size: clamp(20px, 3vw, 26px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.page-head .sub {
+  color: var(--text-dim);
+  font-size: 14px;
+  margin-top: 4px;
+}
+.head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  background: var(--primary);
+  color: white;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--ease), transform var(--ease), border-color var(--ease), color var(--ease);
+  min-height: 38px;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-sec {
+  background: var(--surface);
+  color: var(--text-soft);
+  border-color: var(--border-strong);
+}
+.btn-sec:hover:not(:disabled) { background: var(--surface-2); color: var(--text); border-color: #3b4a6c; }
+
+/* Stat strip */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.stat-label {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.stat-value {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.stat-sub {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin: 14px 0;
+}
+.card h3 {
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  letter-spacing: -0.005em;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+/* Bar chart */
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 7px 0;
+  font-size: 12.5px;
+}
+.bar-label {
+  color: var(--text-soft);
+  flex: 0 0 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-track {
+  flex: 1;
+  height: 12px;
+  background: var(--bg-2);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid var(--border);
+}
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #8b7cff);
+  border-radius: 999px;
+  transition: width 600ms var(--ease);
+  box-shadow: 0 0 8px rgba(139, 124, 255, 0.3);
+}
+.bar-count {
+  color: var(--text-dim);
+  flex: 0 0 40px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Histogram */
+.histogram {
+  display: flex;
+  align-items: end;
+  gap: 3px;
+  height: 90px;
+  margin-top: 8px;
+  padding: 0 2px;
+}
+.histogram .h-bar {
+  flex: 1;
+  background: linear-gradient(to top, #6366f1, #8b7cff);
+  border-radius: 4px 4px 0 0;
+  min-height: 3px;
+  transition: height 400ms var(--ease);
+  cursor: help;
+}
+.histogram-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* Table */
+.table-wrap { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead tr { background: var(--bg-2); }
+th, td { padding: 10px 12px; text-align: left; vertical-align: top; }
+th {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-2);
+  white-space: nowrap;
+}
+td {
+  border-bottom: 1px solid var(--border);
+  max-width: 260px;
+  word-wrap: break-word;
+  color: var(--text-soft);
+}
+tbody tr { transition: background var(--ease); }
+tbody tr:hover td { background: var(--surface-2); }
+tbody tr:last-child td { border-bottom: none; }
+td.user { color: var(--text); font-weight: 500; }
+td.when { color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.score-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 999px;
+  color: var(--warn-text);
+  font-weight: 600;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  text-align: center;
+  padding: 64px 24px;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+.empty-icon {
+  width: 56px; height: 56px;
+  margin: 0 auto 16px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--brand);
+}
+.empty-icon svg { width: 28px; height: 28px; }
+.empty h2 { color: var(--text); font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+.empty p { font-size: 14px; line-height: 1.55; max-width: 400px; margin: 0 auto; }
+.empty-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 0%, var(--surface-2) 50%, var(--surface) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius);
+  height: 96px;
+  margin: 12px 0;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+@media (max-width: 640px) {
+  .shell { padding: 22px 14px 60px; }
+  .head-actions { width: 100%; }
+  .head-actions .btn, .head-actions .btn-sec { flex: 1; }
+  .bar-label { flex: 0 0 90px; font-size: 12px; }
+  th, td { padding: 8px 10px; font-size: 12.5px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="page-head">
+    <div class="title-block">
+      <h1 id="title">Responses</h1>
+      <div class="sub" id="subtitle">Loading…</div>
+    </div>
+    <div class="head-actions">
+      <a class="btn btn-sec" id="back-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Back to forms
+      </a>
+      <a class="btn" id="csv-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download CSV
+      </a>
+    </div>
+  </header>
+  <div id="content"><div class="skeleton" aria-hidden="true"></div><div class="skeleton" aria-hidden="true"></div></div>
+</div>
+
+<script>
+"use strict";
+const BASE = '__BASE_URL__';
+const GUILD = '__GUILD_ID__';
+const FORM_ID = '__FORM_ID__';
+const ORIGIN = new URL(BASE).origin;
+document.getElementById('back-btn').href = BASE + '/admin/' + GUILD;
+document.getElementById('csv-btn').href = BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses/csv';
+
+function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
+
+function emptyState(title, body, actions) {
+  const actionsHtml = (actions && actions.length)
+    ? `<div class="empty-actions">${actions.map(a => {
+        // .btn is the primary style in this template; .btn-sec is the muted variant.
+        const cls = a.primary ? 'btn' : 'btn btn-sec';
+        const target = a.newTab ? ' target="_blank" rel="noopener"' : '';
+        if (a.href) {
+          return `<a class="${cls}" href="${escapeHtml(a.href)}"${target}>${escapeHtml(a.label)}</a>`;
+        }
+        return `<button type="button" class="${cls}" data-empty-action="${escapeHtml(a.id)}">${escapeHtml(a.label)}</button>`;
+      }).join('')}</div>`
+    : '';
+  return `
+    <div class="empty">
+      <div class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(body)}</p>
+      ${actionsHtml}
+    </div>
+  `;
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+document.addEventListener('click', async (e) => {
+  const target = e.target.closest('[data-empty-action]');
+  if (!target) return;
+  const action = target.dataset.emptyAction;
+  if (action === 'copy-link' && window._formShareUrl) {
+    const ok = await copyToClipboard(window._formShareUrl);
+    target.textContent = ok ? 'Link copied!' : 'Copy failed';
+    setTimeout(() => { target.textContent = 'Copy form link'; }, 2500);
+  }
+});
+
+async function load() {
+  try {
+    const res = await fetch(BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses/data', { credentials: 'include' });
+    if (res.status === 401) { location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname); return; }
+    const data = await res.json();
+    if (!res.ok) {
+      document.getElementById('content').innerHTML = emptyState('Failed to load', data.error || 'Try refreshing the page.');
+      document.getElementById('subtitle').textContent = '';
+      return;
+    }
+    document.getElementById('title').textContent = data.title;
+    document.getElementById('subtitle').textContent = 'Responses overview';
+    if (!data.responses.length) {
+      // BASE already includes scheme+host+plugin-path (e.g.
+      // https://example.com/form-respondent-role), so just append /f/{slug}.
+      const shareUrl = BASE + '/f/' + data.slug;
+      const previewUrl = BASE + '/f/' + data.slug + '/preview?token=' + encodeURIComponent(data.preview_token || '');
+      window._formShareUrl = shareUrl;
+      document.getElementById('content').innerHTML = emptyState(
+        'No responses yet',
+        'Share your form to start collecting answers. Once a member submits, you\'ll see their answers here.',
+        [
+          { id: 'copy-link', label: 'Copy form link', primary: true },
+          { href: previewUrl, label: 'Preview as a member', newTab: true },
+        ]
+      );
+      return;
+    }
+    render(data);
+  } catch (e) {
+    document.getElementById('content').innerHTML = emptyState('Network error', e.message);
+  }
+}
+
+function render(data) {
+  const c = document.getElementById('content');
+  let h = '';
+
+  // Stat strip
+  const totalResponses = data.responses.length;
+  const answerable = [];
+  for (const p of (data.schema.pages || [])) for (const q of (p.questions || [])) if (q.kind !== 'info') answerable.push(q);
+  const totalQuestions = answerable.length;
+
+  h += '<div class="stats">';
+  h += `<div class="stat"><div class="stat-label">Total responses</div><div class="stat-value">${totalResponses}</div></div>`;
+  h += `<div class="stat"><div class="stat-label">Questions</div><div class="stat-value">${totalQuestions}</div></div>`;
+  if (data.is_quiz) {
+    const scores = data.responses.map(r => r.total_score || 0);
+    const avg = scores.length ? (scores.reduce((a,b)=>a+b,0) / scores.length) : 0;
+    const max = Math.max(...scores, 0);
+    h += `<div class="stat"><div class="stat-label">Average score</div><div class="stat-value">${avg.toFixed(1)}</div><div class="stat-sub">High: ${max}</div></div>`;
+  }
+  const latest = data.responses.reduce((a,b) => new Date(a.submitted_at) > new Date(b.submitted_at) ? a : b);
+  h += `<div class="stat"><div class="stat-label">Most recent</div><div class="stat-value" style="font-size:14px;font-weight:600;">${new Date(latest.submitted_at).toLocaleString()}</div></div>`;
+  h += '</div>';
+
+  // Quiz score histogram
+  if (data.is_quiz) {
+    const scores = data.responses.map(r => r.total_score || 0);
+    const max = Math.max(...scores, 1);
+    const bins = new Array(11).fill(0);
+    scores.forEach(s => { bins[Math.min(10, Math.floor((s / max) * 10))]++; });
+    const peak = Math.max(...bins, 1);
+    h += `<div class="card"><h3>Score distribution</h3><div class="histogram">${bins.map(b => `<div class="h-bar" style="height:${(b/peak)*100}%" title="${b} response${b===1?'':'s'}"></div>`).join('')}</div><div class="histogram-axis"><span>0</span><span>${max}</span></div></div>`;
+  }
+
+  // Per-question charts (single_choice / multi_choice / scale / dropdown)
+  const chartable = answerable.filter(q => ['single_choice', 'multi_choice', 'dropdown', 'scale'].includes(q.kind));
+  if (chartable.length) {
+    h += '<div class="charts">';
+    for (const q of chartable) {
+      h += renderChart(q, data.responses);
+    }
+    h += '</div>';
+  }
+
+  // Responses table
+  h += '<div class="card"><h3>All responses (' + data.responses.length + ')</h3><div class="table-wrap"><table><thead><tr><th>User</th><th>Submitted</th>';
+  if (data.is_quiz) h += '<th>Score</th>';
+  for (const q of answerable) h += '<th>' + escapeHtml(q.title) + '</th>';
+  h += '</tr></thead><tbody>';
+  for (const r of data.responses) {
+    h += '<tr><td class="user">' + escapeHtml(r.discord_id) + '</td><td class="when">' + new Date(r.submitted_at).toLocaleString() + '</td>';
+    if (data.is_quiz) h += '<td><span class="score-pill">' + (r.total_score ?? '–') + '</span></td>';
+    for (const q of answerable) {
+      const v = r.answers[q.id];
+      let display = '';
+      if (Array.isArray(v)) {
+        const ids = v;
+        const labels = q.options ? ids.map(id => (q.options.find(o => o.id === id) || {label: id}).label) : ids;
+        display = labels.join('; ');
+      } else if (typeof v === 'string') {
+        if (q.options) {
+          const o = q.options.find(o => o.id === v);
+          display = o ? o.label : v;
+        } else display = v;
+      } else if (v != null) display = String(v);
+      h += '<td>' + (display ? escapeHtml(display) : '<span style="color:var(--text-faint);">—</span>') + '</td>';
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table></div></div>';
+
+  c.innerHTML = h;
+}
+
+function renderChart(q, responses) {
+  const counts = {};
+  for (const r of responses) {
+    const v = r.answers[q.id];
+    if (Array.isArray(v)) v.forEach(x => counts[x] = (counts[x]||0)+1);
+    else if (v != null && v !== '') counts[v] = (counts[v]||0)+1;
+  }
+  const labels = q.options ? q.options.map(o => [o.id, o.label]) : Object.keys(counts).sort().map(k => [k, k]);
+  const total = Math.max(1, ...Object.values(counts));
+  let h = `<div class="card"><h3>${escapeHtml(q.title)}</h3>`;
+  if (!labels.length) {
+    h += '<div style="color:var(--text-dim);font-size:13px;">No answers yet.</div>';
+  } else {
+    for (const [id, label] of labels) {
+      const c = counts[id] || 0;
+      const pct = (c / total) * 100;
+      h += `<div class="bar-row"><div class="bar-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div><div class="bar-count">${c}</div></div>`;
+    }
+  }
+  h += '</div>';
+  return h;
+}
+
+load();
+</script>
+</body>
+</html>

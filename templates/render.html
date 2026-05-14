@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__TITLE__</title>
+<link rel="icon" href="__BASE_URL__/favicon.ico" type="image/x-icon">
+<meta property="og:title" content="__TITLE__">
+<meta property="og:description" content="__DESCRIPTION__">
+<meta property="og:url" content="__BASE_URL__/f/__SLUG__">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="color-scheme" content="dark">
+<style>
+:root {
+  --bg: #0a0e1a;
+  --bg-2: #0f1422;
+  --surface: #131a2c;
+  --surface-2: #1a2236;
+  --border: #1f2940;
+  --border-strong: #2c3a55;
+  --text: #e6e8ee;
+  --text-soft: #c8d0dc;
+  --text-dim: #94a0b3;
+  /* Bumped from #6b7588 (~4.6:1 on --bg, borderline AA) to a value that
+     clears WCAG AA comfortably and stays well clear of AAA for body text. */
+  --text-faint: #8b95a8;
+  --brand: #8b7cff;
+  --brand-strong: #7c6bff;
+  --brand-soft: rgba(139, 124, 255, 0.12);
+  --brand-ring: rgba(139, 124, 255, 0.28);
+  --primary: #6366f1;
+  --primary-hover: #5458e0;
+  --danger: #ef4444;
+  --danger-bg: #1d0d11;
+  --danger-border: #6b1d22;
+  --danger-text: #fca5a5;
+  --warn-bg: #2a1a08;
+  --warn-border: #7c4a16;
+  --warn-text: #fcd34d;
+  --success-bg: #07261b;
+  --success-border: #195e3e;
+  --success-text: #86efac;
+  --info-bg: #0c1b30;
+  --info-border: #1d3559;
+  --info-text: #93c5fd;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
+  --shadow: 0 8px 24px rgba(0,0,0,0.4);
+  --shadow-lg: 0 20px 50px rgba(0,0,0,0.55);
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+*:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(139, 124, 255, 0.08), transparent 60%),
+    var(--bg);
+  color: var(--text-soft);
+  min-height: 100vh;
+  line-height: 1.55;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  padding: 0;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #3a4a6b; background-clip: content-box; border: 2px solid transparent; }
+
+.shell {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 20px 140px;
+}
+
+header.hero {
+  margin-bottom: 20px;
+}
+.hero h1 {
+  color: var(--text);
+  font-size: clamp(22px, 4vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+  line-height: 1.25;
+}
+.hero p#desc {
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.hero p#desc:empty { display: none; }
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  margin: 14px 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  animation: fadeIn 200ms var(--ease);
+}
+.banner-preview { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+.banner-info { background: var(--info-bg); color: var(--info-text); border: 1px solid var(--info-border); }
+.banner-icon { flex: 0 0 18px; height: 18px; margin-top: 1px; }
+
+.progress-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  background: linear-gradient(to bottom, var(--bg) 60%, transparent);
+  padding: 14px 0 12px;
+  margin: 4px 0 18px;
+}
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.progress-meta strong { color: var(--text-soft); font-weight: 600; }
+.progress-bar {
+  height: 6px;
+  background: var(--surface);
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #8b7cff);
+  transition: width 350ms var(--ease);
+  border-radius: 999px;
+  box-shadow: 0 0 12px rgba(139, 124, 255, 0.35);
+}
+
+#form { display: flex; flex-direction: column; gap: 14px; }
+
+.q {
+  background: var(--surface);
+  padding: 22px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+  scroll-margin-top: 80px;
+  position: relative;
+}
+.q:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 4px var(--brand-ring);
+}
+.q.invalid {
+  border-color: var(--danger);
+  background: linear-gradient(to bottom, rgba(239, 68, 68, 0.04), transparent 40%), var(--surface);
+}
+.q.invalid:focus-within { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.22); }
+
+.q label.title {
+  display: block;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 4px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+}
+.q .req {
+  color: var(--danger-text);
+  margin-left: 4px;
+  font-weight: 700;
+}
+.q .help {
+  color: var(--text-dim);
+  font-size: 13.5px;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+/* Inputs */
+.q input[type="text"],
+.q input[type="email"],
+.q input[type="number"],
+.q input[type="date"],
+.q textarea,
+.q select {
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.45;
+  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.q input::placeholder, .q textarea::placeholder { color: var(--text-faint); }
+.q input:hover, .q textarea:hover, .q select:hover { border-color: #3b4a6c; }
+.q input:focus, .q textarea:focus, .q select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+  background: var(--surface-2);
+}
+.q textarea { min-height: 110px; resize: vertical; line-height: 1.55; }
+
+.q select {
+  /* `viewBox` only — no explicit width/height — lets the browser rasterize at
+     device-pixel resolution. `background-size` sets the rendered size; the
+     SVG itself is resolution-independent so Retina/HiDPI doesn't blur it. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a0b3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 18px 18px;
+  padding-right: 40px;
+  cursor: pointer;
+}
+
+/* Options (radio / checkbox) */
+.opts { display: flex; flex-direction: column; gap: 8px; }
+.opt {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 13px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--ease), background var(--ease), transform var(--ease);
+  min-height: 48px;
+  user-select: none;
+}
+.opt:hover { border-color: #475569; background: var(--surface-2); }
+.opt:active { transform: scale(0.995); }
+.opt.checked {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+.opt input {
+  margin: 2px 0 0;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand);
+  cursor: pointer;
+  flex: 0 0 18px;
+}
+.opt-label {
+  flex: 1;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+/* Scale */
+.scale-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.scale-btn {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 48px;
+  padding: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: all var(--ease);
+}
+.scale-btn:hover { border-color: #475569; background: var(--surface-2); color: var(--text); }
+.scale-btn.checked {
+  background: var(--brand);
+  color: #0a0e1a;
+  border-color: var(--brand);
+  box-shadow: 0 4px 12px rgba(139, 124, 255, 0.3);
+}
+.scale-hint {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.q .err {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--danger-text);
+  font-size: 13.5px;
+  margin-top: 10px;
+  line-height: 1.45;
+  animation: shake 280ms var(--ease);
+}
+.q .err::before {
+  content: "";
+  display: inline-block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fca5a5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3Cline x1='12' y1='8' x2='12' y2='12'%3E%3C/line%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'%3E%3C/line%3E%3C/svg%3E");
+}
+
+.q .info-block { color: var(--text-soft); font-size: 15px; line-height: 1.6; }
+.q .info-block .title-text { color: var(--text); font-weight: 600; font-size: 16px; margin-bottom: 4px; }
+
+.q.image { padding: 0; background: transparent; border: none; overflow: hidden; }
+.q.image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 480px;
+  object-fit: contain;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.q.image .img-caption {
+  padding: 10px 4px 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+.q.image .img-fail {
+  padding: 28px;
+  color: var(--text-dim);
+  font-size: 14px;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.q.video { padding: 0; background: transparent; border: none; overflow: hidden; }
+.q.video video,
+.q.video iframe {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.q.video .vid-caption {
+  padding: 10px 4px 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+.q.video .vid-fail {
+  padding: 28px;
+  color: var(--text-dim);
+  font-size: 14px;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+/* Sticky action bar (mobile-friendly) */
+.actions {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(10, 14, 26, 0.92);
+  backdrop-filter: saturate(140%) blur(12px);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
+  border-top: 1px solid var(--border);
+  z-index: 10;
+}
+.actions-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+}
+.btn {
+  padding: 12px 24px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background var(--ease), transform var(--ease), box-shadow var(--ease);
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
+}
+.btn:hover:not(:disabled) { background: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35); }
+.btn:active:not(:disabled) { transform: translateY(0); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-ghost { background: transparent; border: 1px solid var(--border-strong); color: var(--text-soft); box-shadow: none; }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border); transform: translateY(-1px); box-shadow: none; }
+.btn .spinner {
+  width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  display: none;
+}
+.btn.loading .spinner { display: inline-block; }
+.btn.loading .btn-label { opacity: 0.85; }
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  min-width: 0;
+  flex: 1;
+}
+.who-avatar {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b7cff, #6366f1);
+  color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  flex: 0 0 26px;
+}
+.who-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who-text strong { color: var(--text); font-weight: 600; }
+
+.toast {
+  position: fixed;
+  bottom: 92px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-border);
+  box-shadow: var(--shadow);
+  z-index: 100;
+  font-size: 14px;
+  max-width: calc(100% - 32px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms var(--ease), transform 220ms var(--ease);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.toast.success { background: var(--success-bg); color: var(--success-text); border-color: var(--success-border); }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 520px) {
+  /* Bottom padding clears the sticky action bar AND respects the iOS home
+     indicator inset so the last question is never hidden. */
+  .shell { padding: 20px 14px calc(150px + env(safe-area-inset-bottom)); }
+  .q { padding: 18px 16px; }
+  .q label.title { font-size: 15px; }
+  /* WCAG 2.5.5 — interactive targets ≥44×44. On a 360px viewport with a
+     10-step scale the row may scroll horizontally; better than sub-spec
+     buttons. */
+  .scale-row { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .scale-btn { font-size: 14px; min-width: 44px; }
+  .actions { padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
+  .btn { padding: 12px 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<script id="bootstrap" type="application/json">__BOOTSTRAP__</script>
+
+<div class="shell">
+  <header class="hero">
+    <h1 id="title">__TITLE__</h1>
+    <p id="desc">__DESCRIPTION__</p>
+  </header>
+
+  <div id="who" class="banner banner-info" style="display:none;" role="status" aria-live="polite">
+    <svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    <div>Signed in as <strong id="who-name"></strong></div>
+  </div>
+
+  <div id="preview-banner" class="banner banner-preview" style="display:none;" role="status">
+    <svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    <div><strong>Preview mode.</strong> Submissions are disabled while editing.</div>
+  </div>
+
+  <div class="progress-wrap" id="progress-wrap" style="display:none;">
+    <div class="progress-meta">
+      <span><strong id="progress-filled">0</strong>&nbsp;<span id="progress-of">of</span>&nbsp;<strong id="progress-total">0</strong> <span id="progress-label">answered</span></span>
+      <span id="progress-pct">0%</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0;"></div></div>
+  </div>
+
+  <form id="form" autocomplete="off" novalidate></form>
+</div>
+
+<div class="actions" role="region" aria-label="Form actions">
+  <div class="actions-inner">
+    <div class="who" id="who-pill" style="display:none;">
+      <div class="who-avatar" id="who-avatar"></div>
+      <div class="who-text">Submitting as <strong id="who-name-pill"></strong></div>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px; margin-left:auto;">
+<button class="btn btn-ghost" id="back-btn" type="button" style="display:none;">Back</button>
+      <button class="btn" id="next-btn" type="button" style="display:none;">Next</button>
+      <button class="btn" id="submit-btn" type="button">
+        <span class="spinner" aria-hidden="true"></span>
+        <span class="btn-label">Submit</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+
+<script>
+"use strict";
+const boot = JSON.parse(document.getElementById('bootstrap').textContent);
+const DRAFT_KEY = 'frr-draft-' + boot.slug;
+const formEl = document.getElementById('form');
+const submitBtn = document.getElementById('submit-btn');
+const submitBtnLabel = submitBtn.querySelector('.btn-label');
+const nextBtn = document.getElementById('next-btn');
+const backBtn = document.getElementById('back-btn');
+const toast = document.getElementById('toast');
+
+// Bootstrap UI state
+document.getElementById('title').textContent = boot.title || 'Form';
+document.getElementById('desc').textContent = boot.description || '';
+if (boot.preview) {
+  document.getElementById('preview-banner').style.display = 'flex';
+  submitBtn.disabled = true;
+  submitBtnLabel.textContent = 'Disabled in preview';
+} else {
+  document.getElementById('who').style.display = 'flex';
+  document.getElementById('who-name').textContent = boot.display_name;
+  // Sticky bottom pill
+  const pill = document.getElementById('who-pill');
+  document.getElementById('who-name-pill').textContent = boot.display_name;
+  const initials = (boot.display_name || '?').trim().slice(0, 1).toUpperCase();
+  document.getElementById('who-avatar').textContent = initials || '?';
+  pill.style.display = 'flex';
+}
+const settings = (boot.schema && boot.schema.settings) || {};
+if (settings.submit_label) submitBtnLabel.textContent = settings.submit_label;
+
+// Restore draft if any
+let answers = {};
+try {
+  const raw = localStorage.getItem(DRAFT_KEY);
+  if (raw) {
+    const d = JSON.parse(raw);
+    if (d && d.version === boot.version) answers = d.answers || {};
+  }
+} catch (_) {}
+
+function saveDraft() {
+  if (boot.preview) return;
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ version: boot.version, answers })); } catch (_) {}
+}
+function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (_) {} }
+
+function flat(schema) {
+  const out = [];
+  for (const p of (schema.pages || [])) {
+    for (const q of (p.questions || [])) out.push(q);
+  }
+  return out;
+}
+
+const PAGES = (boot.schema && boot.schema.pages) || [];
+const QUESTIONS = flat(boot.schema || {});
+const ANSWERABLE = QUESTIONS.filter(q => q.kind !== 'info' && q.kind !== 'image' && q.kind !== 'video');
+let currentPage = 0;
+
+// Defense-in-depth: even though sanity_check rejects unsafe URLs at save
+// time, recheck before injecting into <img src>. http(s) only.
+function isSafeImageUrl(u) {
+  if (typeof u !== 'string') return false;
+  const s = u.trim().toLowerCase();
+  if (s.startsWith('javascript:') || s.startsWith('data:') || s.startsWith('vbscript:') || s.startsWith('file:')) return false;
+  return s.startsWith('http://') || s.startsWith('https://');
+}
+
+function youtubeEmbedUrl(url) {
+  try {
+    const u = new URL(url);
+    const h = u.hostname.replace(/^www\./, '');
+    if (h === 'youtu.be') return 'https://www.youtube.com/embed/' + u.pathname.slice(1).split('?')[0];
+    if (h === 'youtube.com') {
+      if (u.pathname.startsWith('/embed/')) return 'https://www.youtube.com/embed/' + u.pathname.split('/')[2];
+      if (u.pathname.startsWith('/shorts/')) return 'https://www.youtube.com/embed/' + u.pathname.split('/')[2];
+      const v = u.searchParams.get('v');
+      if (v) return 'https://www.youtube.com/embed/' + v;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+function renderQuestion(q) {
+  const wrap = document.createElement('div');
+  wrap.className = 'q';
+  wrap.dataset.qid = q.id;
+
+  if (q.kind === 'info') {
+    wrap.innerHTML = `<div class="info-block"><div class="title-text">${escapeHtml(q.title)}</div>${q.description ? '<div class="help" style="margin-top:6px; margin-bottom:0;">' + escapeHtml(q.description) + '</div>' : ''}</div>`;
+    return wrap;
+  }
+
+  if (q.kind === 'image') {
+    wrap.classList.add('image');
+    const url = q.image_url || '';
+    const alt = q.alt_text || q.title || '';
+    const caption = q.title || '';
+    if (isSafeImageUrl(url)) {
+      wrap.innerHTML =
+        `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<div class=\\'img-fail\\'>Image failed to load.</div>'">`
+        + (caption && caption !== alt ? `<div class="img-caption">${escapeHtml(caption)}</div>` : '');
+    } else {
+      wrap.innerHTML = `<div class="img-fail">Image URL is missing or unsafe.</div>`;
+    }
+    return wrap;
+  }
+
+  if (q.kind === 'video') {
+    wrap.classList.add('video');
+    const url = (q.image_url || '').trim();
+    const caption = q.title || '';
+    if (isSafeImageUrl(url)) {
+      const ytEmbed = youtubeEmbedUrl(url);
+      const media = ytEmbed
+        ? `<iframe src="${escapeHtml(ytEmbed)}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`
+        : `<video src="${escapeHtml(url)}" controls preload="metadata" referrerpolicy="no-referrer"></video>`;
+      wrap.innerHTML = media + (caption ? `<div class="vid-caption">${escapeHtml(caption)}</div>` : '');
+    } else {
+      wrap.innerHTML = `<div class="vid-fail">Video URL is missing or unsafe.</div>`;
+    }
+    return wrap;
+  }
+
+  let h = `<label class="title" for="qi-${escapeHtml(q.id)}">${escapeHtml(q.title)}${q.required ? '<span class="req" aria-hidden="true">*</span><span class="sr-only"> required</span>' : ''}</label>`;
+  if (q.description) h += `<div class="help">${escapeHtml(q.description)}</div>`;
+
+  const v = answers[q.id];
+  switch (q.kind) {
+    case 'short_text':
+    case 'email':
+      h += `<input id="qi-${escapeHtml(q.id)}" type="${q.kind === 'email' ? 'email' : 'text'}" data-q="${escapeHtml(q.id)}" maxlength="${q.max_length || 100}" value="${escapeHtml(v || '')}" ${q.placeholder ? 'placeholder="' + escapeHtml(q.placeholder) + '"' : ''} ${q.kind === 'email' ? 'inputmode="email" autocomplete="email"' : ''}>`;
+      break;
+    case 'long_text':
+      h += `<textarea id="qi-${escapeHtml(q.id)}" data-q="${escapeHtml(q.id)}" maxlength="${q.max_length || 4000}" ${q.placeholder ? 'placeholder="' + escapeHtml(q.placeholder) + '"' : ''}>${escapeHtml(v || '')}</textarea>`;
+      break;
+    case 'number':
+      h += `<input id="qi-${escapeHtml(q.id)}" type="number" inputmode="decimal" data-q="${escapeHtml(q.id)}" ${q.min != null ? 'min="' + q.min + '"' : ''} ${q.max != null ? 'max="' + q.max + '"' : ''} value="${escapeHtml(v || '')}">`;
+      break;
+    case 'date':
+      h += `<input id="qi-${escapeHtml(q.id)}" type="date" data-q="${escapeHtml(q.id)}" value="${escapeHtml(v || '')}">`;
+      break;
+    case 'single_choice': {
+      h += '<div class="opts" role="radiogroup">';
+      for (const o of (q.options || [])) {
+        const checked = v === o.id;
+        h += `<label class="opt${checked ? ' checked' : ''}"><input type="radio" name="${escapeHtml(q.id)}" data-q="${escapeHtml(q.id)}" value="${escapeHtml(o.id)}" ${checked ? 'checked' : ''}><span class="opt-label">${escapeHtml(o.label)}</span></label>`;
+      }
+      h += '</div>';
+      break;
+    }
+    case 'dropdown': {
+      h += `<select id="qi-${escapeHtml(q.id)}" data-q="${escapeHtml(q.id)}"><option value="">Choose an option…</option>`;
+      for (const o of (q.options || [])) {
+        h += `<option value="${escapeHtml(o.id)}" ${v === o.id ? 'selected' : ''}>${escapeHtml(o.label)}</option>`;
+      }
+      h += '</select>';
+      break;
+    }
+    case 'multi_choice': {
+      const set = new Set(Array.isArray(v) ? v : []);
+      h += '<div class="opts">';
+      for (const o of (q.options || [])) {
+        const checked = set.has(o.id);
+        h += `<label class="opt${checked ? ' checked' : ''}"><input type="checkbox" data-q="${escapeHtml(q.id)}" data-multi value="${escapeHtml(o.id)}" ${checked ? 'checked' : ''}><span class="opt-label">${escapeHtml(o.label)}</span></label>`;
+      }
+      h += '</div>';
+      break;
+    }
+    case 'scale': {
+      const min = Math.max(1, q.min || 1);
+      const max = Math.min(10, q.max || 5);
+      h += '<div class="scale-row" role="radiogroup">';
+      for (let i = min; i <= max; i++) {
+        const checked = String(v) === String(i);
+        h += `<button type="button" class="scale-btn${checked ? ' checked' : ''}" data-q="${escapeHtml(q.id)}" data-scale="${i}" aria-pressed="${checked}">${i}</button>`;
+      }
+      h += '</div>';
+      h += `<div class="scale-hint"><span>${min} — least</span><span>${max} — most</span></div>`;
+      break;
+    }
+    case 'agreement': {
+      const checked = v === 'true' || v === true;
+      h += `<label class="opt${checked ? ' checked' : ''}"><input type="checkbox" data-q="${escapeHtml(q.id)}" data-agree ${checked ? 'checked' : ''}><span class="opt-label">${escapeHtml(q.title)}</span></label>`;
+      break;
+    }
+  }
+  h += `<div class="err" data-err="${escapeHtml(q.id)}" style="display:none;" role="alert"></div>`;
+  wrap.innerHTML = h;
+  return wrap;
+}
+
+function renderPage() {
+  formEl.innerHTML = '';
+  const page = PAGES[currentPage] || { questions: [] };
+  for (const q of page.questions) formEl.appendChild(renderQuestion(q));
+  bindEvents();
+  updateProgress();
+  updateNav();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function updateNav() {
+  const multiPage = PAGES.length > 1;
+  const isFirst = currentPage === 0;
+  const isLast = currentPage >= PAGES.length - 1;
+  backBtn.style.display = multiPage && !isFirst ? '' : 'none';
+  nextBtn.style.display = multiPage && !isLast ? '' : 'none';
+  submitBtn.style.display = !multiPage || isLast ? '' : 'none';
+}
+
+function validatePage(questions) {
+  const errors = [];
+  for (const q of questions) {
+    if (!q.required) continue;
+    const v = answers[q.id];
+    let empty = Array.isArray(v) ? v.length === 0 : (v === '' || v == null);
+    if (empty) errors.push({ question_id: q.id, message: 'This field is required.' });
+  }
+  return errors;
+}
+
+function bindEvents() {
+  formEl.addEventListener('input', onInput, { capture: true });
+  formEl.addEventListener('change', onInput, { capture: true });
+  formEl.addEventListener('click', onClick, { capture: true });
+}
+
+function onInput(e) {
+  const t = e.target;
+  const q = t.dataset.q;
+  if (!q) return;
+  if (t.dataset.multi !== undefined) {
+    const list = Array.isArray(answers[q]) ? answers[q].slice() : [];
+    if (t.checked && !list.includes(t.value)) list.push(t.value);
+    if (!t.checked) {
+      const i = list.indexOf(t.value);
+      if (i >= 0) list.splice(i, 1);
+    }
+    answers[q] = list;
+    t.closest('.opt').classList.toggle('checked', t.checked);
+  } else if (t.dataset.agree !== undefined) {
+    answers[q] = t.checked ? 'true' : '';
+    t.closest('.opt').classList.toggle('checked', t.checked);
+  } else if (t.type === 'radio') {
+    answers[q] = t.value;
+    formEl.querySelectorAll(`label.opt input[name="${q}"]`).forEach(el => el.closest('.opt').classList.toggle('checked', el.checked));
+  } else {
+    answers[q] = t.value;
+  }
+  // clear any inline error on edit
+  const qWrap = t.closest('.q');
+  if (qWrap && qWrap.classList.contains('invalid')) {
+    qWrap.classList.remove('invalid');
+    const err = qWrap.querySelector('.err');
+    if (err) { err.textContent = ''; err.style.display = 'none'; }
+  }
+  saveDraft();
+  updateProgress();
+}
+
+function onClick(e) {
+  const btn = e.target.closest('.scale-btn');
+  if (btn) {
+    const q = btn.dataset.q;
+    answers[q] = btn.dataset.scale;
+    formEl.querySelectorAll(`.scale-btn[data-q="${q}"]`).forEach(b => {
+      const isCurrent = b === btn;
+      b.classList.toggle('checked', isCurrent);
+      b.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+    });
+    const qWrap = btn.closest('.q');
+    if (qWrap && qWrap.classList.contains('invalid')) {
+      qWrap.classList.remove('invalid');
+      const err = qWrap.querySelector('.err');
+      if (err) { err.textContent = ''; err.style.display = 'none'; }
+    }
+    saveDraft();
+    updateProgress();
+  }
+}
+
+function updateProgress() {
+  const wrap = document.getElementById('progress-wrap');
+  const multiPage = PAGES.length > 1;
+  if (!settings.show_progress_bar && !multiPage) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  if (multiPage) {
+    const pagePct = Math.round(((currentPage + 1) / PAGES.length) * 100);
+    document.getElementById('progress-fill').style.width = pagePct + '%';
+    document.getElementById('progress-filled').textContent = currentPage + 1;
+    document.getElementById('progress-of').textContent = 'of';
+    document.getElementById('progress-total').textContent = PAGES.length;
+    document.getElementById('progress-label').textContent = 'pages';
+    document.getElementById('progress-pct').textContent = (currentPage + 1) + ' / ' + PAGES.length;
+  } else if (settings.show_progress_bar && ANSWERABLE.length) {
+    const filled = ANSWERABLE.filter(q => {
+      const v = answers[q.id];
+      if (Array.isArray(v)) return v.length > 0;
+      return v !== '' && v != null;
+    }).length;
+    const pct = Math.round((filled / ANSWERABLE.length) * 100);
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-filled').textContent = filled;
+    document.getElementById('progress-total').textContent = ANSWERABLE.length;
+    document.getElementById('progress-pct').textContent = pct + '%';
+  }
+}
+
+function showToast(msg, kind) {
+  toast.textContent = msg;
+  toast.className = 'toast show' + (kind ? ' ' + kind : '');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => { toast.className = 'toast' + (kind ? ' ' + kind : ''); }, 4800);
+}
+
+function clearErrors() {
+  formEl.querySelectorAll('.err').forEach(e => { e.textContent = ''; e.style.display = 'none'; });
+  formEl.querySelectorAll('.q.invalid').forEach(e => e.classList.remove('invalid'));
+}
+
+function showErrors(fieldErrors) {
+  for (const fe of fieldErrors) {
+    const errEl = formEl.querySelector(`[data-err="${fe.question_id}"]`);
+    if (errEl) {
+      errEl.textContent = fe.message;
+      errEl.style.display = 'flex';
+      errEl.closest('.q').classList.add('invalid');
+    }
+  }
+  const first = formEl.querySelector('.q.invalid');
+  if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+nextBtn.addEventListener('click', () => {
+  const page = PAGES[currentPage] || { questions: [] };
+  const errors = validatePage(page.questions);
+  if (errors.length) { showErrors(errors); showToast('Please fix the highlighted questions.'); return; }
+  clearErrors();
+  currentPage++;
+  renderPage();
+});
+
+backBtn.addEventListener('click', () => {
+  clearErrors();
+  currentPage--;
+  renderPage();
+});
+
+submitBtn.addEventListener('click', async () => {
+  if (boot.preview) return;
+  clearErrors();
+  submitBtn.disabled = true;
+  submitBtn.classList.add('loading');
+  submitBtnLabel.textContent = 'Submitting…';
+  try {
+    const res = await fetch(boot.base_url + '/f/' + boot.slug + '/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ answers, version: boot.version }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 422 && data.field_errors) {
+      showErrors(data.field_errors);
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('loading');
+      submitBtnLabel.textContent = settings.submit_label || 'Submit';
+      showToast('Please fix the highlighted questions.');
+      return;
+    }
+    if (!res.ok) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('loading');
+      submitBtnLabel.textContent = settings.submit_label || 'Submit';
+      showToast(data.error || ('Submission failed (' + res.status + ')'));
+      return;
+    }
+    clearDraft();
+    const params = new URLSearchParams();
+    if (data.message) params.set('msg', data.message);
+    if (data.total_score != null) params.set('score', data.total_score);
+    location.href = boot.base_url + '/f/' + boot.slug + '/done' + (params.toString() ? '?' + params.toString() : '');
+  } catch (e) {
+    submitBtn.disabled = false;
+    submitBtn.classList.remove('loading');
+    submitBtnLabel.textContent = settings.submit_label || 'Submit';
+    showToast(e.message || 'Network error');
+  }
+});
+
+renderPage();
+</script>
+</body>
+</html>

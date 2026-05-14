@@ -1,0 +1,77 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8089:8089"
+    environment:
+      # The DB password is now parameterized so a misconfigured local compose
+      # doesn't get committed with a hardcoded credential. Both halves below
+      # default to the same env var so prod and dev share one source of truth.
+      DATABASE_URL: postgres://frr:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD env var must be set}@db:5432/form_respondent_role
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET env var must be set}
+      BASE_URL: ${BASE_URL:?BASE_URL env var must be set}
+      LISTEN_ADDR: "0.0.0.0:8089"
+      AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY env var must be set}
+      ROLELOGIC_API_URL: ${ROLELOGIC_API_URL:-}
+      RL_DASHBOARD_ORIGIN: ${RL_DASHBOARD_ORIGIN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    # Container HEALTHCHECK is defined inside the Dockerfile and re-exposed
+    # here so compose / orchestrators pick it up consistently.
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --max-time
+        - "2"
+        - http://127.0.0.1:8089/form-respondent-role/health
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        # Bumped from 128M after audit. Even with the 256KB body limit, 128M
+        # leaves no headroom for sqlx pools + tokio runtime + concurrent
+        # JSON parses. 512M is the new soft minimum; tune up after load tests.
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  db:
+    image: postgres:16-alpine
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c work_mem=2MB
+      -c maintenance_work_mem=32MB
+      -c effective_cache_size=128MB
+      -c max_connections=15
+      -c wal_buffers=4MB
+      -c checkpoint_completion_target=0.9
+      -c random_page_cost=1.1
+    environment:
+      POSTGRES_DB: form_respondent_role
+      POSTGRES_USER: frr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD env var must be set}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: '64m'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U frr -d form_respondent_role"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  pgdata:

@@ -1,0 +1,73 @@
+{
+  "title": "Server Rules Quiz",
+  "description": "A quick check that you've read the rules. Score 80+ to qualify.",
+  "settings": {
+    "submit_label": "Submit answers",
+    "show_progress_bar": true,
+    "shuffle_questions": false
+  },
+  "pages": [
+    {
+      "id": "p1",
+      "title": "Rules quiz",
+      "description": "Replace these example questions with your own server rules.",
+      "questions": [
+        {
+          "id": "q1",
+          "kind": "single_choice",
+          "title": "What channel is for off-topic chat?",
+          "required": true,
+          "options": [
+            { "id": "general", "label": "#general" },
+            { "id": "lounge", "label": "#lounge" },
+            { "id": "memes", "label": "#memes" }
+          ],
+          "correct": "lounge",
+          "points": 25
+        },
+        {
+          "id": "q2",
+          "kind": "single_choice",
+          "title": "Are NSFW links allowed in any public channel?",
+          "required": true,
+          "options": [
+            { "id": "yes", "label": "Yes, anywhere" },
+            { "id": "no", "label": "No, never" },
+            { "id": "sometimes", "label": "Only in #nsfw" }
+          ],
+          "correct": "no",
+          "points": 25
+        },
+        {
+          "id": "q3",
+          "kind": "multi_choice",
+          "title": "Which of these are bannable on first offense? (Select all)",
+          "required": true,
+          "options": [
+            { "id": "spam", "label": "Spamming" },
+            { "id": "doxx", "label": "Doxxing another member" },
+            { "id": "swear", "label": "Mild swearing" },
+            { "id": "hate", "label": "Hate speech" }
+          ],
+          "correct": ["doxx", "hate"],
+          "points": 25
+        },
+        {
+          "id": "q4",
+          "kind": "short_text",
+          "title": "Who do you DM if you spot a rule violation? (One handle, no @)",
+          "required": true,
+          "max_length": 60,
+          "correct": "modteam",
+          "points": 25
+        },
+        {
+          "id": "q_agree",
+          "kind": "agreement",
+          "title": "I commit to following these rules.",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "title": "Untitled form",
+  "description": "",
+  "settings": {
+    "submit_label": "Submit",
+    "show_progress_bar": true,
+    "shuffle_questions": false
+  },
+  "pages": [
+    {
+      "id": "p1",
+      "title": "Page 1",
+      "description": "",
+      "questions": []
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Submitted</title>
+<meta name="theme-color" content="#0a0e1a">
+<meta name="color-scheme" content="dark">
+<style>
+:root {
+  --bg: #0a0e1a;
+  --surface: #131a2c;
+  --border: #1f2940;
+  --text: #e6e8ee;
+  --text-soft: #c8d0dc;
+  --text-dim: #94a0b3;
+  --brand: #8b7cff;
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background:
+    radial-gradient(800px 400px at 50% 20%, rgba(139, 124, 255, 0.08), transparent 60%),
+    var(--bg);
+  color: var(--text-soft);
+  min-height: 100vh;
+  line-height: 1.55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  -webkit-font-smoothing: antialiased;
+}
+.card {
+  max-width: 480px;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 40px 28px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  animation: enter 360ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.check-wrap {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--success-soft);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 50%;
+  position: relative;
+}
+.check-wrap::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.18), transparent 70%);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+.check {
+  width: 36px;
+  height: 36px;
+  position: relative;
+  z-index: 1;
+}
+.check svg { width: 100%; height: 100%; stroke-dasharray: 80; stroke-dashoffset: 80; animation: draw 600ms 220ms ease forwards; }
+h1 {
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  letter-spacing: -0.01em;
+}
+p#msg {
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.score {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 22px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(251, 191, 36, 0.04));
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 999px;
+  color: #fbbf24;
+  font-weight: 600;
+  font-size: 14px;
+}
+.score::before {
+  content: "★";
+  font-size: 16px;
+}
+.hint {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.hint strong { color: var(--text-soft); font-weight: 600; }
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.06); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .check svg { stroke-dashoffset: 0; }
+}
+</style>
+</head>
+<body>
+<main class="card" role="status" aria-live="polite">
+  <div class="check-wrap" aria-hidden="true">
+    <div class="check">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12.5 L10 18 L20 6"/>
+      </svg>
+    </div>
+  </div>
+  <h1 id="title">Thanks — you're all set!</h1>
+  <p id="msg">Your response has been recorded.</p>
+  <div id="score" style="display:none;" class="score"></div>
+  <div class="hint">Server roles update automatically — please allow <strong>up to a minute</strong> for changes to appear.</div>
+</main>
+<script>
+const params = new URLSearchParams(location.search);
+const score = params.get('score');
+if (score !== null && score !== '') {
+  const s = document.getElementById('score');
+  s.textContent = 'Score: ' + score;
+  s.style.display = 'inline-flex';
+}
+const customMsg = params.get('msg');
+if (customMsg) document.getElementById('msg').textContent = customMsg;
+</script>
+</body>
+</html>

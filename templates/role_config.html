@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Role configuration — Form Respondent Role</title>
+<link rel="icon" href="__BASE_URL__/favicon.ico" type="image/x-icon">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="color-scheme" content="dark">
+<style>
+:root {
+  --bg: #0a0e1a;
+  --bg-2: #0f1422;
+  --surface: #131a2c;
+  --surface-2: #1a2236;
+  --surface-3: #232c44;
+  --border: #1f2940;
+  --border-strong: #2c3a55;
+  --text: #e6e8ee;
+  --text-soft: #c8d0dc;
+  --text-dim: #94a0b3;
+  --text-faint: #8b95a8;
+  --brand: #8b7cff;
+  --brand-strong: #7c6bff;
+  --brand-soft: rgba(139, 124, 255, 0.10);
+  --brand-ring: rgba(139, 124, 255, 0.28);
+  --primary: #6366f1;
+  --primary-hover: #5458e0;
+  --danger: #ef4444;
+  --danger-bg: #1d0d11;
+  --danger-border: #6b1d22;
+  --danger-text: #fca5a5;
+  --warn-bg: #2a1a08;
+  --warn-text: #fcd34d;
+  --warn-border: #7c4a16;
+  --success-text: #86efac;
+  --info-bg: #0c1b30;
+  --info-text: #93c5fd;
+  --info-border: #1d3559;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 8px 24px rgba(0,0,0,0.4);
+  --shadow-lg: 0 20px 50px rgba(0,0,0,0.55);
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+*:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--radius-sm); }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text-soft);
+  min-height: 100vh;
+  line-height: 1.5;
+  padding-bottom: 96px;
+  -webkit-font-smoothing: antialiased;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #3a4a6b; background-clip: content-box; border: 2px solid transparent; }
+
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header h1 {
+  font-size: 13px;
+  color: var(--text-faint);
+  flex: 1;
+  text-align: right;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+header .breadcrumb {
+  color: var(--text-faint);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+header .breadcrumb a {
+  color: var(--text-soft);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+header .breadcrumb a:hover { color: var(--text); }
+header .breadcrumb code {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+main { max-width: 880px; margin: 0 auto; padding: 28px 24px; }
+
+#loading {
+  color: var(--text-dim);
+  padding: 80px 20px;
+  text-align: center;
+  font-size: 14px;
+}
+#loading::before {
+  content: "";
+  display: block;
+  width: 36px; height: 36px;
+  margin: 0 auto 16px;
+  border: 3px solid var(--border);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin: 16px 0;
+  transition: border-color var(--ease);
+  position: relative;
+}
+section:hover { border-color: var(--border-strong); }
+section h2 {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+section h2 .step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px; height: 24px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(139, 124, 255, 0.35);
+}
+section .sub {
+  color: var(--text-dim);
+  font-size: 13.5px;
+  margin-bottom: 18px;
+  line-height: 1.55;
+}
+
+label.field {
+  display: block;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  margin: 14px 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Inputs */
+input[type="text"], input[type="number"], input[type="date"], select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13.5px;
+  transition: border-color var(--ease), box-shadow var(--ease);
+  -webkit-appearance: none;
+  appearance: none;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+input:hover:not(:focus), select:hover:not(:focus), textarea:hover:not(:focus) { border-color: #3b4a6c; }
+select {
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2394a0b3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 36px;
+}
+
+/* Radio options */
+.radio-group { display: flex; flex-direction: column; gap: 10px; }
+.radio-opt {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--ease), background var(--ease), transform var(--ease);
+  user-select: none;
+  min-height: 50px;
+}
+.radio-opt:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.radio-opt:active { transform: scale(0.997); }
+.radio-opt.selected {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+.radio-opt input[type="radio"] {
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand);
+  flex: 0 0 18px;
+  cursor: pointer;
+}
+.radio-opt .opt-main { flex: 1; min-width: 0; }
+.radio-opt .opt-main strong {
+  display: block;
+  color: var(--text);
+  font-size: 14.5px;
+  margin-bottom: 2px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.radio-opt .opt-main span {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Conditions */
+#conds { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px dashed var(--border); }
+#conds.shown { display: block; animation: fadeIn 200ms var(--ease); }
+.cond-list { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.cond {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.6fr auto;
+  gap: 8px;
+  align-items: start;
+  padding: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--ease);
+}
+.cond:hover { border-color: var(--border-strong); }
+.cond.invalid { border-color: var(--danger-border); background: rgba(239, 68, 68, 0.03); }
+.cond .cond-value { display: flex; flex-direction: column; gap: 6px; }
+.cond .num-range {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 6px;
+  align-items: center;
+}
+.cond .num-range .sep { color: var(--text-faint); font-size: 13px; text-align: center; }
+.cond .multi-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  min-height: 40px;
+}
+.cond .multi-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+  padding: 5px 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all var(--ease);
+}
+.cond .multi-list label:hover { border-color: var(--brand); }
+.cond .multi-list label:has(input:checked) { background: var(--brand-soft); border-color: var(--brand); color: var(--text); }
+.cond .multi-list input { accent-color: var(--brand); width: 14px; height: 14px; }
+.cond-err {
+  grid-column: 1 / -1;
+  color: var(--danger-text);
+  font-size: 12.5px;
+  padding-top: 4px;
+}
+.cond-meta {
+  grid-column: 1 / -1;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-style: italic;
+}
+.btn-icon {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  min-width: 36px;
+  min-height: 36px;
+  transition: all var(--ease);
+}
+.btn-icon:hover { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
+
+#add-cond { margin-top: 14px; }
+@media (max-width: 720px) {
+  .cond { grid-template-columns: 1fr; }
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 18px;
+  background: var(--primary);
+  color: white;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--ease), transform var(--ease), border-color var(--ease), color var(--ease);
+  min-height: 38px;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--primary-hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-sec {
+  background: transparent;
+  color: var(--text-soft);
+  border-color: var(--border-strong);
+}
+.btn-sec:hover:not(:disabled) { background: var(--surface-2); color: var(--text); border-color: #3b4a6c; }
+
+/* Status banners */
+.warn, .info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  margin-top: 12px;
+  line-height: 1.5;
+}
+.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+.info { background: var(--info-bg); color: var(--info-text); border: 1px solid var(--info-border); }
+.warn::before, .info::before {
+  content: "";
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+.warn::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fcd34d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'%3E%3C/path%3E%3Cline x1='12' y1='9' x2='12' y2='13'%3E%3C/line%3E%3Cline x1='12' y1='17' x2='12.01' y2='17'%3E%3C/line%3E%3C/svg%3E");
+}
+.info::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2393c5fd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3Cline x1='12' y1='16' x2='12' y2='12'%3E%3C/line%3E%3Cline x1='12' y1='8' x2='12.01' y2='8'%3E%3C/line%3E%3C/svg%3E");
+}
+
+.form-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin-top: 12px;
+  font-size: 12.5px;
+}
+.form-links a {
+  color: var(--brand);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color var(--ease);
+}
+.form-links a:hover { color: #b3a8ff; text-decoration: underline; }
+.form-links a svg { width: 12px; height: 12px; opacity: 0.8; }
+
+/* Sticky save bar */
+.savebar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(19, 26, 44, 0.92);
+  backdrop-filter: saturate(140%) blur(12px);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
+  border-top: 1px solid var(--border);
+  padding: 12px 24px calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+  z-index: 5;
+}
+.savebar .status {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.savebar .status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+/* Toast.
+   In the RoleLogic dashboard the page lives in an auto-resized iframe with
+   no internal scroll — the *parent* page is what scrolls. That means
+   `position: fixed` would anchor the toast to the iframe document (often
+   far off-screen of the parent's visible area), not to the user's actual
+   viewport. So we render the toast `position: absolute` inside the body
+   and `scrollIntoView()` it into the parent's view when shown; auto-
+   dismisses on a timer. See showToast() in the script below. */
+.toast {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -8px);
+  padding: 11px 18px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-border);
+  z-index: 100;
+  font-size: 13.5px;
+  display: none;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  max-width: calc(100% - 32px);
+  text-align: center;
+}
+.toast.success { background: #07261b; color: var(--success-text); border-color: #195e3e; display: block; }
+.toast.error { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); display: block; }
+.toast.success, .toast.error { transform: translate(-50%, 0); animation: slideIn 220ms var(--ease); }
+
+@keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 640px) {
+  header { padding: 10px 16px; }
+  header h1 { display: none; }
+  main { padding: 22px 16px; }
+  section { padding: 20px 16px; }
+  .savebar { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  /* Toast: tighter padding on phones — the body is still position:absolute
+     centered, so left/right insets are handled by max-width. */
+  .toast { padding: 10px 14px; font-size: 13px; max-width: calc(100% - 24px); }
+  /* Condition rows: stack widgets vertically — the four-column grid is
+     unreadable on phones (already handled at 720px in the cond CSS, but
+     the savebar leaves ~96px of bottom padding which is too much for the
+     small viewport). */
+  body { padding-bottom: 110px; }
+  /* No-forms CTA: stretch the create-form button so it's tappable. */
+  #no-forms-cta .btn { width: 100%; justify-content: center; }
+  /* Radio cards: drop the bigger min-height — content already determines
+     it and 50px is a lot of wasted space when the labels are tight. */
+  .radio-opt { min-height: 0; padding: 12px 14px; }
+  .radio-opt .opt-main strong { font-size: 14px; }
+  .radio-opt .opt-main span { font-size: 12.5px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header data-hide-in-iframe>
+  <div class="breadcrumb">
+    <a id="back-link" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Forms</a>
+    <span style="color:var(--text-faint);">/</span>
+    <span>Role <code id="rid-tag"></code></span>
+  </div>
+  <h1>Form Respondent Role</h1>
+</header>
+
+<main>
+  <div id="loading">Loading configuration…</div>
+
+  <div id="content" style="display:none;">
+    <section>
+      <h2><span class="step" aria-hidden="true">1</span>Form</h2>
+      <div class="sub">Which form should grant this role when submitted?</div>
+      <div id="no-forms-cta" class="info" style="display:none; flex-direction:column; align-items:flex-start; gap:12px;">
+        <div>You don't have any forms in this server yet. Create one first, then come back to bind it to this role.</div>
+        <a id="create-form-link" class="btn" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Create a form
+        </a>
+      </div>
+      <div id="form-picker-wrap">
+        <label class="field" for="form-picker">Form</label>
+        <select id="form-picker"></select>
+        <div class="form-links">
+          <a id="edit-form-link" target="_blank" rel="noopener" style="display:none;">Edit form <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+          <a id="responses-link" target="_blank" rel="noopener" style="display:none;">View responses <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+          <a id="manage-forms-link" target="_blank" rel="noopener">Manage forms <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+        </div>
+      </div>
+      <div id="form-warn" class="warn" style="display:none;"></div>
+    </section>
+
+    <section>
+      <h2><span class="step" aria-hidden="true">2</span>Who qualifies?</h2>
+      <div class="sub">Pick the rule that decides who gets the role.</div>
+      <div class="radio-group">
+        <label class="radio-opt" data-mode="any_submission">
+          <input type="radio" name="mode" value="any_submission">
+          <div class="opt-main">
+            <strong>Anyone who submits</strong>
+            <span>Default. Everyone who finishes the form gets the role.</span>
+          </div>
+        </label>
+        <label class="radio-opt" data-mode="conditions">
+          <input type="radio" name="mode" value="conditions">
+          <div class="opt-main">
+            <strong>Only if their answers match…</strong>
+            <span>Build a rule that compares an answer to a value. <strong>All</strong> conditions must match for the member to qualify (AND, not OR).</span>
+          </div>
+        </label>
+      </div>
+
+      <div id="conds">
+        <div id="cond-empty" class="info" style="display:none;">
+          <p style="margin-bottom: 6px;">No conditions yet &mdash; click <strong style="margin:0 4px;">+ Add condition</strong> below to start.</p>
+          <p style="color: var(--text-dim); font-size: 13px; line-height: 1.55;">
+            <strong>Examples</strong>
+            <span style="display:block; margin-top: 4px;">&bull; <em>&ldquo;Age&rdquo;</em> <em>&ge;</em> <em>18</em> &mdash; gate by self-reported age</span>
+            <span style="display:block;">&bull; <em>&ldquo;Region&rdquo;</em> <em>is one of</em> <em>EU, UK</em> &mdash; gate by region</span>
+            <span style="display:block;">&bull; <em>&ldquo;Quiz total score&rdquo;</em> <em>&ge;</em> <em>8</em> &mdash; gate quiz forms by score</span>
+          </p>
+        </div>
+        <div class="cond-list" id="cond-list"></div>
+        <button class="btn btn-sec" id="add-cond" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add condition
+        </button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="savebar" id="savebar" style="display:none;">
+  <div class="status" id="status-text"></div>
+  <button class="btn btn-sec" id="reset-btn" type="button">Reset</button>
+  <button class="btn" id="save-btn" type="button">Save changes</button>
+</div>
+
+<div class="toast" id="toast" role="alert" aria-live="assertive"></div>
+
+<script>
+const BASE = '__BASE_URL__';
+const GUILD = '__GUILD_ID__';
+const ROLE = '__ROLE_ID__';
+const ORIGIN = new URL(BASE).origin;
+// Non-empty when this page was opened inside the RoleLogic dashboard iframe.
+// We use it instead of credentials:'include' because third-party cookies are
+// unreliable across browsers (Safari ITP, Firefox ETP, Chrome Privacy Sandbox).
+const IFRAME_TOKEN = '__IFRAME_TOKEN__';
+const IS_EMBEDDED = !!IFRAME_TOKEN;
+
+// Auth header for XHRs from this page. Cookie path falls through to the
+// browser's normal cookie jar; embedded path attaches the iframe-session
+// token minted at page render.
+function apiHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  if (IFRAME_TOKEN) h['Authorization'] = 'Bearer ' + IFRAME_TOKEN;
+  return h;
+}
+function apiCreds() { return IS_EMBEDDED ? 'omit' : 'include'; }
+
+document.getElementById('back-link').href = BASE + '/admin/' + GUILD;
+document.getElementById('rid-tag').textContent = ROLE;
+// "Create a form" CTA opens the per-guild admin page where the New-form
+// modal lives. Target=_blank so we don't navigate the iframe away.
+document.getElementById('create-form-link').href = BASE + '/admin/' + GUILD;
+
+// When embedded, hide breadcrumbs / external links — the dashboard owns
+// navigation, and those would navigate the iframe away from this view.
+if (IS_EMBEDDED) {
+  document.querySelectorAll('[data-hide-in-iframe]').forEach(el => { el.style.display = 'none'; });
+  document.body.style.paddingTop = '0';
+}
+
+// postMessage helpers — host (RoleLogic dashboard) listens for these.
+function postToHost(msg) {
+  if (!IS_EMBEDDED) return;
+  try { parent.postMessage(msg, '*'); } catch (_) {}
+}
+function postHeight() {
+  if (!IS_EMBEDDED) return;
+  const h = Math.max(
+    document.documentElement.scrollHeight,
+    document.body.scrollHeight,
+  );
+  postToHost({ type: 'rl:resize', height: h });
+}
+function postDirty(d) { postToHost({ type: 'rl:dirty', dirty: !!d }); }
+function postSaved()  { postToHost({ type: 'rl:saved' }); }
+/// Defer toast rendering to the host. The dashboard's notification system
+/// is anchored to the *parent* viewport, so it stays visible regardless of
+/// how far the user has scrolled inside this iframe — which the in-iframe
+/// fallback can't guarantee (the iframe auto-resizes; there is no internal
+/// viewport for `position: fixed` to attach to).
+function postToast(message, kind) { postToHost({ type: 'rl:toast', message: String(message || ''), kind: kind || 'error' }); }
+
+// Re-measure whenever the page reflows.
+if (IS_EMBEDDED && 'ResizeObserver' in window) {
+  new ResizeObserver(postHeight).observe(document.body);
+}
+window.addEventListener('load', postHeight);
+
+const TEXT_KINDS = new Set(['short_text', 'long_text', 'email']);
+const PICKER_KINDS = new Set(['single_choice', 'dropdown', 'agreement']);
+const MULTI_KINDS = new Set(['multi_choice']);
+const NUMERIC_KINDS = new Set(['number', 'scale']);
+const DATE_KINDS = new Set(['date']);
+
+let state = null;       // server data: { config, forms, operators, max_conditions }
+let dirty = false;      // unsaved changes?
+let initial = null;     // serialized initial config for the Reset button
+
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+// Toast positioning: the iframe is auto-resized (no internal scroll), so
+// `position: fixed` would pin to the iframe document — usually well off
+// the parent's actual viewport. Instead:
+//   • The toast is `position: absolute` inside body.
+//   • We track the user's last click coordinates and place the toast
+//     just below that point, since the click was definitely inside the
+//     parent's visible viewport (you can't click what you can't see).
+//   • Fall back to `scrollIntoView({block: 'nearest'})` for the rare
+//     no-click case (e.g. a load-time error) — `nearest` is a no-op when
+//     the element is already in view, so it never jolts the scroll
+//     position unnecessarily.
+// Auto-dismisses on a timer; no manual close affordance.
+let lastClickY = 0;
+document.addEventListener('click', (e) => {
+  // iframe has no internal scroll, so clientY ≈ position in iframe doc.
+  if (e.clientY > 0) lastClickY = e.clientY;
+}, true);
+function showToast(msg, kind) {
+  // When embedded, defer to the host's notification system — its toasts are
+  // anchored to the parent viewport and stay visible regardless of how the
+  // iframe is sized or scrolled. The in-iframe fallback below is for the
+  // standalone-tab case where there is no parent to defer to.
+  if (IS_EMBEDDED) {
+    postToast(msg, kind);
+    return;
+  }
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  // Anchor 16px below the last click. Cap to the document height so the
+  // toast can't disappear past the bottom of the iframe.
+  if (lastClickY > 0) {
+    const maxY = Math.max(document.documentElement.scrollHeight - 80, 0);
+    t.style.top = Math.min(lastClickY + 16, maxY) + 'px';
+  } else {
+    t.style.top = '24px';
+  }
+  t.className = 'toast ' + (kind || 'error');
+  try { t.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(
+    () => { t.className = 'toast'; },
+    kind === 'success' ? 2500 : 4000,
+  );
+}
+
+async function load() {
+  try {
+    const res = await fetch(BASE + '/admin/' + GUILD + '/role/' + ROLE + '/data', {
+      headers: apiHeaders(),
+      credentials: apiCreds(),
+    });
+    if (res.status === 401) {
+      if (IS_EMBEDDED) {
+        document.getElementById('loading').textContent = 'Your session expired. Reopen this plugin from the RoleLogic dashboard.';
+        postHeight();
+        return;
+      }
+      location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname);
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      document.getElementById('loading').textContent = data.error || 'Failed to load.';
+      return;
+    }
+    state = data;
+    initial = JSON.stringify(data.config);
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+    document.getElementById('savebar').style.display = 'flex';
+    render();
+  } catch (e) {
+    document.getElementById('loading').textContent = e.message;
+  }
+}
+
+// Refetch on tab return. We split the update into two parts so unsaved
+// edits are never clobbered:
+//
+//   • `state.forms` (the available forms list) is *external* data — it
+//     changes when the admin creates / edits / archives forms in another
+//     tab. Safe to update at any time; doesn't touch user input.
+//
+//   • `state.config` is the *current edit buffer* (form binding, mode,
+//     conditions, view permission). Only refreshed when `dirty` is false,
+//     otherwise we'd silently overwrite the user's in-progress changes.
+//
+// We only re-render when something actually changed, to avoid blowing away
+// scroll position / open dropdowns for no reason. `refreshInFlight` debounces
+// overlapping events so concurrent fetches don't pile up.
+let refreshInFlight = false;
+async function refreshFromServer() {
+  if (!state || refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    const res = await fetch(BASE + '/admin/' + GUILD + '/role/' + ROLE + '/data', {
+      headers: apiHeaders(),
+      credentials: apiCreds(),
+      cache: 'no-store',
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const formsChanged =
+      JSON.stringify(data.forms) !== JSON.stringify(state.forms);
+    const configChanged =
+      JSON.stringify(data.config) !== JSON.stringify(state.config);
+
+    let changed = false;
+    if (formsChanged) {
+      state.forms = data.forms;
+      changed = true;
+    }
+    if (configChanged && !dirty) {
+      state.config = data.config;
+      initial = JSON.stringify(data.config);
+      changed = true;
+    }
+    if (changed) render();
+  } catch (_) { /* swallow — next event will retry */ } finally {
+    refreshInFlight = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshFromServer();
+});
+window.addEventListener('focus', refreshFromServer);
+window.addEventListener('pageshow', refreshFromServer);
+
+// Parent (RoleLogic dashboard) sends `rl:visible` on tab-return because
+// in-iframe visibilitychange isn't reliable in all browsers. This is the
+// authoritative trigger when embedded.
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'rl:visible') refreshFromServer();
+});
+
+function currentForm() {
+  const fid = state.config.form_id;
+  return state.forms.find(f => f.id === fid) || null;
+}
+
+function questionById(form, qid) {
+  if (!form) return null;
+  if (qid === '__quiz_total_score__') {
+    return form.is_quiz ? { id: qid, title: 'Quiz total score', kind: '__quiz_total_score__', is_array_valued: false, options: [] } : null;
+  }
+  return form.questions.find(q => q.id === qid) || null;
+}
+
+function operatorsForKind(kind) {
+  return state.operators.filter(op => op.kinds.includes(kind));
+}
+
+function widgetFor(op, kind) {
+  // op: operator key; kind: question kind (or "__quiz_total_score__")
+  if (op === 'between') return 'number_range';
+  if (['gt', 'gte', 'lt', 'lte'].includes(op)) return 'number';
+  if (['before', 'after'].includes(op)) return 'date';
+  if (['contains', 'regex'].includes(op)) return 'text';
+  if (['contains_all', 'contains_any', 'not_contains'].includes(op)) return 'multi_picker';
+  if (op === 'in') {
+    return PICKER_KINDS.has(kind) || MULTI_KINDS.has(kind) ? 'multi_picker' : 'multi_text';
+  }
+  if (op === 'eq' || op === 'neq') {
+    if (PICKER_KINDS.has(kind)) return 'picker';
+    if (MULTI_KINDS.has(kind)) return 'multi_picker';
+    return 'text';
+  }
+  return 'text';
+}
+
+function render() {
+  renderFormPicker();
+  renderFormWarning();
+  renderModeRadios();
+  renderConditions();
+  renderStatus();
+}
+
+function renderFormPicker() {
+  const sel = document.getElementById('form-picker');
+  const pickerWrap = document.getElementById('form-picker-wrap');
+  const noFormsCta = document.getElementById('no-forms-cta');
+
+  // No forms in this guild at all — the picker is useless. Replace it with
+  // a "Create a form" CTA so the admin isn't staring at an empty dropdown.
+  if (!state.forms || state.forms.length === 0) {
+    pickerWrap.style.display = 'none';
+    noFormsCta.style.display = 'flex';
+    renderFormLinks();
+    return;
+  }
+  pickerWrap.style.display = 'block';
+  noFormsCta.style.display = 'none';
+
+  let html = '<option value="">— pick a form —</option>';
+  state.forms.forEach(f => {
+    const tag = f.is_quiz ? ' (quiz)' : '';
+    const arch = f.archived ? ' [archived]' : '';
+    html += `<option value="${escapeHtml(f.id)}" ${f.id === state.config.form_id ? 'selected' : ''}>${escapeHtml(f.title)}${tag}${arch}</option>`;
+  });
+  sel.innerHTML = html;
+  sel.onchange = () => {
+    state.config.form_id = sel.value;
+    // Existing conditions may reference questions that no longer exist on
+    // the new form — keep them around (the back-end will refuse to save),
+    // but flag them in the UI.
+    markDirty();
+    render();
+  };
+  renderFormLinks();
+}
+
+function renderFormLinks() {
+  // "Manage forms ↗" — always points to the per-guild forms list.
+  const manage = document.getElementById('manage-forms-link');
+  manage.href = BASE + '/admin/' + GUILD;
+
+  // "Edit form ↗" / "View responses ↗" — only meaningful when a form is bound.
+  const fid = state.config.form_id;
+  const editLink = document.getElementById('edit-form-link');
+  const respLink = document.getElementById('responses-link');
+  if (fid) {
+    editLink.href = BASE + '/admin/' + GUILD + '/forms/' + encodeURIComponent(fid);
+    editLink.style.display = 'inline-flex';
+    respLink.href = BASE + '/admin/' + GUILD + '/forms/' + encodeURIComponent(fid) + '/responses';
+    respLink.style.display = 'inline-flex';
+  } else {
+    editLink.style.display = 'none';
+    respLink.style.display = 'none';
+  }
+}
+
+function renderFormWarning() {
+  const w = document.getElementById('form-warn');
+  const fid = state.config.form_id;
+  if (!fid) {
+    w.style.display = 'flex';
+    w.textContent = 'No form picked yet — pick one to enable the role.';
+    return;
+  }
+  const f = currentForm();
+  if (!f) {
+    w.style.display = 'flex';
+    w.textContent = 'The form bound to this role was deleted. Pick another form (or "— pick a form —" to unbind).';
+    return;
+  }
+  if (f.archived) {
+    w.style.display = 'flex';
+    w.textContent = 'This form is archived. People can\'t submit it anymore — pick a different form or un-archive it from the form builder.';
+    return;
+  }
+  w.style.display = 'none';
+}
+
+function renderModeRadios() {
+  const mode = state.config.mode || 'any_submission';
+  document.querySelectorAll('.radio-opt[data-mode]').forEach(el => {
+    const me = el.dataset.mode;
+    el.classList.toggle('selected', me === mode);
+    el.querySelector('input').checked = (me === mode);
+    el.onclick = () => {
+      state.config.mode = me;
+      markDirty();
+      render();
+    };
+  });
+  document.getElementById('conds').classList.toggle('shown', mode === 'conditions');
+}
+
+function renderConditions() {
+  const list = document.getElementById('cond-list');
+  const empty = document.getElementById('cond-empty');
+  const form = currentForm();
+  const conds = state.config.conditions || [];
+
+  if (state.config.mode === 'conditions' && conds.length === 0) {
+    empty.style.display = 'flex';
+  } else {
+    empty.style.display = 'none';
+  }
+
+  list.innerHTML = '';
+  conds.forEach((cond, idx) => {
+    list.appendChild(renderCondRow(form, cond, idx));
+  });
+
+  const addBtn = document.getElementById('add-cond');
+  addBtn.disabled = !form || conds.length >= state.max_conditions;
+  if (conds.length >= state.max_conditions) {
+    addBtn.innerHTML = `Max ${state.max_conditions} conditions reached`;
+  } else {
+    addBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add condition`;
+  }
+  addBtn.onclick = () => {
+    if (!form) return;
+    // First question by default; or quiz total score for quiz forms with no questions.
+    const firstQ = form.questions[0];
+    const targetId = firstQ ? firstQ.id : (form.is_quiz ? '__quiz_total_score__' : '');
+    if (!targetId) {
+      showToast('This form has no questions to gate on.');
+      return;
+    }
+    const kind = firstQ ? firstQ.kind : '__quiz_total_score__';
+    const op = operatorsForKind(kind)[0]?.key || 'eq';
+    conds.push({ target: targetId, operator: op, value: defaultValueFor(op, firstQ), value_end: null });
+    markDirty();
+    render();
+  };
+}
+
+function defaultValueFor(op, question) {
+  if (op === 'between' || ['gt','gte','lt','lte'].includes(op)) return '';
+  if (['contains_all','contains_any','not_contains','in'].includes(op)) return [];
+  if ((op === 'eq' || op === 'neq') && question && question.is_array_valued) return [];
+  return '';
+}
+
+function renderCondRow(form, cond, idx) {
+  const row = document.createElement('div');
+  row.className = 'cond';
+  const question = questionById(form, cond.target);
+  const kind = question ? question.kind : '__quiz_total_score__';
+
+  // ---- Target picker ----
+  const targetSel = document.createElement('select');
+  let tHtml = '';
+  if (form) {
+    form.questions.forEach(q => {
+      tHtml += `<option value="${escapeHtml(q.id)}" ${q.id === cond.target ? 'selected' : ''}>${escapeHtml(q.title)} (${q.kind.replace(/_/g, ' ')})</option>`;
+    });
+    if (form.is_quiz) {
+      tHtml += `<option value="__quiz_total_score__" ${cond.target === '__quiz_total_score__' ? 'selected' : ''}>Quiz total score</option>`;
+    }
+  }
+  if (!question && cond.target) {
+    tHtml = `<option value="${escapeHtml(cond.target)}" selected>${escapeHtml(cond.target)} (missing)</option>` + tHtml;
+  }
+  targetSel.innerHTML = tHtml;
+  targetSel.onchange = () => {
+    cond.target = targetSel.value;
+    const newQ = questionById(form, cond.target);
+    const newKind = newQ ? newQ.kind : '__quiz_total_score__';
+    // Reset operator if the current one isn't valid for the new kind.
+    const validOps = operatorsForKind(newKind);
+    if (!validOps.find(o => o.key === cond.operator)) {
+      cond.operator = validOps[0]?.key || 'eq';
+    }
+    cond.value = defaultValueFor(cond.operator, newQ);
+    cond.value_end = null;
+    markDirty();
+    render();
+  };
+  row.appendChild(targetSel);
+
+  // ---- Operator picker ----
+  const opSel = document.createElement('select');
+  const validOps = operatorsForKind(kind);
+  let oHtml = '';
+  validOps.forEach(op => {
+    oHtml += `<option value="${escapeHtml(op.key)}" ${op.key === cond.operator ? 'selected' : ''}>${escapeHtml(op.label)}</option>`;
+  });
+  if (validOps.length === 0) {
+    oHtml = `<option value="${escapeHtml(cond.operator || '')}">(no operators for this question)</option>`;
+  }
+  opSel.innerHTML = oHtml;
+  opSel.onchange = () => {
+    cond.operator = opSel.value;
+    cond.value = defaultValueFor(cond.operator, question);
+    cond.value_end = null;
+    markDirty();
+    render();
+  };
+  row.appendChild(opSel);
+
+  // ---- Value widget ----
+  const valBox = document.createElement('div');
+  valBox.className = 'cond-value';
+  const widget = widgetFor(cond.operator, kind);
+  buildValueWidget(valBox, widget, cond, question);
+  row.appendChild(valBox);
+
+  // ---- Remove ----
+  const rm = document.createElement('button');
+  rm.className = 'btn-icon';
+  rm.type = 'button';
+  rm.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  rm.title = 'Remove this condition';
+  rm.setAttribute('aria-label', 'Remove condition');
+  rm.onclick = () => {
+    state.config.conditions.splice(idx, 1);
+    markDirty();
+    render();
+  };
+  row.appendChild(rm);
+
+  // ---- Meta line (warning if target is missing) ----
+  if (!question && cond.target) {
+    const meta = document.createElement('div');
+    meta.className = 'cond-err';
+    meta.textContent = `Question "${cond.target}" no longer exists on the chosen form. Pick another question or remove this row.`;
+    row.classList.add('invalid');
+    row.appendChild(meta);
+  }
+
+  return row;
+}
+
+function buildValueWidget(box, widget, cond, question) {
+  box.innerHTML = '';
+  if (widget === 'text') {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = typeof cond.value === 'string' ? cond.value : '';
+    inp.placeholder = cond.operator === 'regex' ? 'e.g. ^[A-Z]+$' : 'value';
+    inp.oninput = () => { cond.value = inp.value; markDirty(); };
+    box.appendChild(inp);
+    return;
+  }
+  if (widget === 'number') {
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.value = (cond.value ?? '');
+    inp.oninput = () => { cond.value = inp.value; markDirty(); };
+    box.appendChild(inp);
+    return;
+  }
+  if (widget === 'number_range') {
+    const wrap = document.createElement('div');
+    wrap.className = 'num-range';
+    const a = document.createElement('input'); a.type = 'number'; a.placeholder = 'min'; a.value = cond.value ?? '';
+    const sep = document.createElement('div'); sep.className = 'sep'; sep.textContent = '–';
+    const b = document.createElement('input'); b.type = 'number'; b.placeholder = 'max'; b.value = cond.value_end ?? '';
+    a.oninput = () => { cond.value = a.value; markDirty(); };
+    b.oninput = () => { cond.value_end = b.value; markDirty(); };
+    wrap.appendChild(a); wrap.appendChild(sep); wrap.appendChild(b);
+    box.appendChild(wrap);
+    return;
+  }
+  if (widget === 'date') {
+    const inp = document.createElement('input');
+    inp.type = 'date';
+    inp.value = typeof cond.value === 'string' ? cond.value : '';
+    inp.oninput = () => { cond.value = inp.value; markDirty(); };
+    box.appendChild(inp);
+    return;
+  }
+  if (widget === 'picker') {
+    const sel = document.createElement('select');
+    const opts = question?.options || [];
+    let html = '<option value="">— pick —</option>';
+    opts.forEach(o => {
+      html += `<option value="${escapeHtml(o.id)}" ${cond.value === o.id ? 'selected' : ''}>${escapeHtml(o.label)}</option>`;
+    });
+    sel.innerHTML = html;
+    sel.onchange = () => { cond.value = sel.value; markDirty(); };
+    box.appendChild(sel);
+    return;
+  }
+  if (widget === 'multi_picker') {
+    const list = document.createElement('div');
+    list.className = 'multi-list';
+    const opts = question?.options || [];
+    const current = Array.isArray(cond.value) ? cond.value.slice() : [];
+    if (opts.length === 0) {
+      const note = document.createElement('div');
+      note.style.cssText = 'color:var(--text-dim); font-size:12.5px; padding:6px;';
+      note.textContent = 'This question has no predefined options.';
+      list.appendChild(note);
+    } else {
+      opts.forEach(o => {
+        const lbl = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = current.includes(o.id);
+        cb.onchange = () => {
+          if (cb.checked) {
+            if (!current.includes(o.id)) current.push(o.id);
+          } else {
+            const i = current.indexOf(o.id);
+            if (i >= 0) current.splice(i, 1);
+          }
+          cond.value = current.slice();
+          markDirty();
+        };
+        lbl.appendChild(cb);
+        lbl.appendChild(document.createTextNode(' ' + o.label));
+        list.appendChild(lbl);
+      });
+    }
+    box.appendChild(list);
+    return;
+  }
+  if (widget === 'multi_text') {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    const arr = Array.isArray(cond.value) ? cond.value : [];
+    inp.value = arr.join(', ');
+    inp.placeholder = 'comma-separated values';
+    inp.oninput = () => {
+      cond.value = inp.value.split(',').map(s => s.trim()).filter(Boolean);
+      markDirty();
+    };
+    box.appendChild(inp);
+    const hint = document.createElement('div');
+    hint.style.cssText = 'color:var(--text-faint); font-size:11px;';
+    hint.textContent = 'Separate items with commas.';
+    box.appendChild(hint);
+    return;
+  }
+}
+
+function markDirty() {
+  const was = dirty;
+  dirty = true;
+  renderStatus();
+  if (!was) postDirty(true);
+}
+
+function renderStatus() {
+  const s = document.getElementById('status-text');
+  if (dirty) {
+    s.textContent = 'Unsaved changes';
+    s.style.color = 'var(--warn-text)';
+  } else {
+    s.textContent = 'All changes saved';
+    s.style.color = 'var(--text-faint)';
+  }
+  document.getElementById('save-btn').disabled = !dirty;
+  document.getElementById('reset-btn').disabled = !dirty;
+}
+
+async function save() {
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const body = {
+      form_id: state.config.form_id || null,
+      mode: state.config.mode || 'any_submission',
+      conditions: (state.config.conditions || []).map(c => ({
+        target: c.target,
+        operator: c.operator,
+        value: c.value,
+        value_end: c.value_end,
+      })),
+      // view_permission is owned by the admin-list page now; omit it from
+      // role-config saves so a save here can't accidentally overwrite the
+      // server-wide setting.
+    };
+    const res = await fetch(BASE + '/admin/' + GUILD + '/role/' + ROLE, {
+      method: 'POST',
+      credentials: apiCreds(),
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Save failed.', 'error');
+      return;
+    }
+    initial = JSON.stringify(state.config);
+    dirty = false;
+    renderStatus();
+    showToast('Saved.', 'success');
+    postSaved();
+    postDirty(false);
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.textContent = 'Save changes';
+  }
+}
+
+function resetChanges() {
+  state.config = JSON.parse(initial);
+  dirty = false;
+  postDirty(false);
+  render();
+}
+
+document.getElementById('save-btn').onclick = save;
+document.getElementById('reset-btn').onclick = resetChanges;
+// In-iframe close handling is delegated to the dashboard via rl:dirty
+// postMessage. Outside the iframe, fall back to the native unload prompt.
+if (!IS_EMBEDDED) {
+  window.addEventListener('beforeunload', e => {
+    if (dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
+}
+
+load();
+</script>
+</body>
+</html>

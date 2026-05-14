@@ -1,0 +1,59 @@
+{
+  "title": "Server Application",
+  "description": "Tell us a bit about yourself before we approve your access.",
+  "settings": {
+    "submit_label": "Submit application",
+    "show_progress_bar": true,
+    "shuffle_questions": false
+  },
+  "pages": [
+    {
+      "id": "p1",
+      "title": "About you",
+      "description": "",
+      "questions": [
+        {
+          "id": "q_age",
+          "kind": "number",
+          "title": "How old are you?",
+          "required": true,
+          "min": 13,
+          "max": 120
+        },
+        {
+          "id": "q_region",
+          "kind": "single_choice",
+          "title": "What region are you in?",
+          "required": true,
+          "options": [
+            { "id": "na", "label": "North America" },
+            { "id": "eu", "label": "Europe" },
+            { "id": "asia", "label": "Asia" },
+            { "id": "other", "label": "Other" }
+          ]
+        },
+        {
+          "id": "q_referral",
+          "kind": "short_text",
+          "title": "How did you hear about us?",
+          "required": false,
+          "max_length": 200
+        },
+        {
+          "id": "q_why",
+          "kind": "long_text",
+          "title": "Why do you want to join?",
+          "description": "A sentence or two is plenty.",
+          "required": true,
+          "max_length": 1000
+        },
+        {
+          "id": "q_rules",
+          "kind": "agreement",
+          "title": "I have read and agree to the server rules.",
+          "required": true
+        }
+      ]
+    }
+  ]
+}
