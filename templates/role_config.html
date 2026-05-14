@@ -581,7 +581,7 @@ select {
         <div class="form-links">
           <a id="edit-form-link" target="_blank" rel="noopener" style="display:none;">Edit form <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
           <a id="responses-link" target="_blank" rel="noopener" style="display:none;">View responses <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
-          <a id="manage-forms-link" target="_blank" rel="noopener">Manage forms <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+          <a id="manage-forms-link" target="_blank" rel="noopener">Create or manage forms <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
         </div>
       </div>
       <div id="form-warn" class="warn" style="display:none;"></div>
@@ -951,6 +951,13 @@ function renderFormWarning() {
   const w = document.getElementById('form-warn');
   const fid = state.config.form_id;
   if (!fid) {
+    // When the guild has zero forms, `renderFormPicker` already swaps the
+    // dropdown for a "Create a form" CTA — re-prompting "pick one" on top
+    // of that is misleading (there's nothing to pick).
+    if (!state.forms || state.forms.length === 0) {
+      w.style.display = 'none';
+      return;
+    }
     w.style.display = 'flex';
     w.textContent = 'No form picked yet — pick one to enable the role.';
     return;
@@ -1010,16 +1017,20 @@ function renderConditions() {
   }
   addBtn.onclick = () => {
     if (!form) return;
-    // First question by default; or quiz total score for quiz forms with no questions.
+    // For quizzes, gating on total_score is the common case — make it the
+    // default so admins don't have to flip the picker every time. Falls
+    // back to the first question for non-quiz forms.
     const firstQ = form.questions[0];
-    const targetId = firstQ ? firstQ.id : (form.is_quiz ? '__quiz_total_score__' : '');
+    const useQuizScore = !!form.is_quiz;
+    const targetId = useQuizScore ? '__quiz_total_score__' : (firstQ ? firstQ.id : '');
     if (!targetId) {
       showToast('This form has no questions to gate on.');
       return;
     }
-    const kind = firstQ ? firstQ.kind : '__quiz_total_score__';
+    const kind = useQuizScore ? '__quiz_total_score__' : firstQ.kind;
     const op = operatorsForKind(kind)[0]?.key || 'eq';
-    conds.push({ target: targetId, operator: op, value: defaultValueFor(op, firstQ), value_end: null });
+    const question = useQuizScore ? null : firstQ;
+    conds.push({ target: targetId, operator: op, value: defaultValueFor(op, question), value_end: null });
     markDirty();
     render();
   };
@@ -1042,12 +1053,15 @@ function renderCondRow(form, cond, idx) {
   const targetSel = document.createElement('select');
   let tHtml = '';
   if (form) {
-    form.questions.forEach(q => {
-      tHtml += `<option value="${escapeHtml(q.id)}" ${q.id === cond.target ? 'selected' : ''}>${escapeHtml(q.title)} (${q.kind.replace(/_/g, ' ')})</option>`;
-    });
+    // On quiz forms, surface "Quiz total score" first — it's the most-used
+    // gate (score >= passing threshold) and saves the admin from hunting
+    // for it at the bottom of a long question list.
     if (form.is_quiz) {
       tHtml += `<option value="__quiz_total_score__" ${cond.target === '__quiz_total_score__' ? 'selected' : ''}>Quiz total score</option>`;
     }
+    form.questions.forEach(q => {
+      tHtml += `<option value="${escapeHtml(q.id)}" ${q.id === cond.target ? 'selected' : ''}>${escapeHtml(q.title)} (${q.kind.replace(/_/g, ' ')})</option>`;
+    });
   }
   if (!question && cond.target) {
     tHtml = `<option value="${escapeHtml(cond.target)}" selected>${escapeHtml(cond.target)} (missing)</option>` + tHtml;

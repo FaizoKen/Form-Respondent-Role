@@ -1,6 +1,7 @@
 {
   "title": "Server Rules Quiz",
-  "description": "A quick check that you've read the rules. Score 80+ to qualify.",
+  "description": "A quick check that you've read the rules. Answer 4 of 4 correctly to pass.",
+  "passing_score": 80,
   "settings": {
     "submit_label": "Submit answers",
     "show_progress_bar": true,

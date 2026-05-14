@@ -58,6 +58,10 @@ pub async fn run_migrations(pool: &PgPool) {
             "007",
             include_str!("../migrations/007_response_schema_version.sql"),
         ),
+        (
+            "008",
+            include_str!("../migrations/008_form_passing_score.sql"),
+        ),
     ];
     for (id, sql) in migrations {
         sqlx::raw_sql(sql)

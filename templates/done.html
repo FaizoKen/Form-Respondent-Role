@@ -85,23 +85,28 @@ p#msg {
   line-height: 1.6;
   white-space: pre-wrap;
 }
-.score {
+.result {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   margin-top: 22px;
   padding: 10px 20px;
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(251, 191, 36, 0.04));
-  border: 1px solid rgba(251, 191, 36, 0.35);
   border-radius: 999px;
-  color: #fbbf24;
   font-weight: 600;
   font-size: 14px;
 }
-.score::before {
-  content: "★";
-  font-size: 16px;
+.result.pass {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.05));
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
 }
+.result.pass::before { content: "✓"; font-size: 16px; }
+.result.fail {
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.12), rgba(248, 113, 113, 0.05));
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #f87171;
+}
+.result.fail::before { content: "✕"; font-size: 16px; }
 .hint {
   margin-top: 20px;
   padding-top: 20px;
@@ -140,16 +145,17 @@ p#msg {
   </div>
   <h1 id="title">Thanks — you're all set!</h1>
   <p id="msg">Your response has been recorded.</p>
-  <div id="score" style="display:none;" class="score"></div>
+  <div id="result" style="display:none;" class="result"></div>
   <div class="hint">Server roles update automatically — please allow <strong>up to a minute</strong> for changes to appear.</div>
 </main>
 <script>
 const params = new URLSearchParams(location.search);
-const score = params.get('score');
-if (score !== null && score !== '') {
-  const s = document.getElementById('score');
-  s.textContent = 'Score: ' + score;
-  s.style.display = 'inline-flex';
+const result = params.get('result');
+if (result === 'pass' || result === 'fail') {
+  const el = document.getElementById('result');
+  el.textContent = result === 'pass' ? 'Passed' : 'Not passed';
+  el.classList.add(result);
+  el.style.display = 'inline-flex';
 }
 const customMsg = params.get('msg');
 if (customMsg) document.getElementById('msg').textContent = customMsg;

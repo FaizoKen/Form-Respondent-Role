@@ -942,7 +942,10 @@ submitBtn.addEventListener('click', async () => {
     clearDraft();
     const params = new URLSearchParams();
     if (data.message) params.set('msg', data.message);
-    if (data.total_score != null) params.set('score', data.total_score);
+    // Quiz submits return a `passed` boolean (no raw score — that would let
+    // users edit-loop towards the answer key). Non-quiz submits omit both.
+    if (data.passed === true) params.set('result', 'pass');
+    else if (data.passed === false) params.set('result', 'fail');
     location.href = boot.base_url + '/f/' + boot.slug + '/done' + (params.toString() ? '?' + params.toString() : '');
   } catch (e) {
     submitBtn.disabled = false;

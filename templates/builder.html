@@ -946,6 +946,12 @@ main {
           <label style="margin-top:0;">Options</label>
           <label class="check"><input type="checkbox" id="s-progress"> Show progress bar to respondents</label>
           <label class="check"><input type="checkbox" id="s-quiz"> Quiz mode (auto-grade answers)</label>
+          <div id="s-quiz-extra" style="display:none;margin-top:8px;padding-left:24px;">
+            <label style="margin-top:0;">Passing score <span style="text-transform:none;font-weight:400;color:var(--text-faint);">(optional)</span></label>
+            <input id="s-passing-score" type="number" min="0" max="1000000" placeholder="e.g. 8">
+            <p class="muted" style="margin-top:6px;">Respondents see <em>passed</em> or <em>not passed</em>—never the raw score. Leave blank to accept any submission as passing.</p>
+            <p class="muted" style="margin-top:6px;">Quiz mode also forces one submission per person with no edits, and shuffles question and option order on every page load.</p>
+          </div>
         </div>
       </div>
 
@@ -1092,6 +1098,8 @@ function fillSettingsModal() {
   document.getElementById('s-submit-label').value = s.submit_label || 'Submit';
   document.getElementById('s-progress').checked = s.show_progress_bar !== false;
   document.getElementById('s-quiz').checked = !!state.is_quiz;
+  document.getElementById('s-passing-score').value =
+    state.passing_score === null || state.passing_score === undefined ? '' : state.passing_score;
   document.getElementById('s-open-at').value = state.open_at ? state.open_at.slice(0, 16) : '';
   document.getElementById('s-close-at').value = state.close_at ? state.close_at.slice(0, 16) : '';
   document.getElementById('s-allow-edits').checked = !!state.allow_edits;
@@ -1101,6 +1109,24 @@ function fillSettingsModal() {
   document.getElementById('s-success-msg').value = state.success_message || 'Thanks for your response!';
   document.getElementById('s-webhook-url').value = state.webhook_url || '';
   document.getElementById('s-archived').checked = !!state.archived;
+  refreshQuizExtras();
+}
+
+// Quiz mode hides the per-submission knobs the server-side enforcement
+// overrides anyway (allow_edits is forced off, single_submission is forced
+// on) — leaving them clickable would mislead admins about what actually
+// applies.
+function refreshQuizExtras() {
+  const quiz = document.getElementById('s-quiz').checked;
+  document.getElementById('s-quiz-extra').style.display = quiz ? 'block' : 'none';
+  const edits = document.getElementById('s-allow-edits');
+  const single = document.getElementById('s-single-submission');
+  if (quiz) {
+    edits.checked = false;
+    single.checked = true;
+  }
+  edits.disabled = quiz;
+  single.disabled = quiz;
 }
 
 function readSettingsModal() {
@@ -1108,7 +1134,7 @@ function readSettingsModal() {
   const s = state.schema.settings;
   const snap = () => JSON.stringify([
     s.submit_label, s.show_progress_bar,
-    state.is_quiz, state.open_at, state.close_at,
+    state.is_quiz, state.passing_score, state.open_at, state.close_at,
     state.allow_edits, state.single_submission, state.require_verified,
     state.min_account_age_days, state.success_message, state.webhook_url, state.archived,
   ]);
@@ -1116,17 +1142,22 @@ function readSettingsModal() {
   s.submit_label = document.getElementById('s-submit-label').value || 'Submit';
   s.show_progress_bar = document.getElementById('s-progress').checked;
   state.is_quiz = document.getElementById('s-quiz').checked;
+  const psRaw = document.getElementById('s-passing-score').value.trim();
+  state.passing_score = state.is_quiz && psRaw !== '' ? parseInt(psRaw, 10) : null;
   const openAt = document.getElementById('s-open-at').value;
   const closeAt = document.getElementById('s-close-at').value;
   state.open_at = openAt ? new Date(openAt).toISOString() : null;
   state.close_at = closeAt ? new Date(closeAt).toISOString() : null;
-  state.allow_edits = document.getElementById('s-allow-edits').checked;
-  state.single_submission = document.getElementById('s-single-submission').checked;
+  // Quiz mode overrides these on the server too; mirror that here so the
+  // builder displays what the server will actually persist.
+  state.allow_edits = state.is_quiz ? false : document.getElementById('s-allow-edits').checked;
+  state.single_submission = state.is_quiz ? true : document.getElementById('s-single-submission').checked;
   state.require_verified = document.getElementById('s-require-verified').checked;
   state.min_account_age_days = parseInt(document.getElementById('s-min-age').value || '0', 10);
   state.success_message = document.getElementById('s-success-msg').value || 'Thanks for your response!';
   state.webhook_url = document.getElementById('s-webhook-url').value || null;
   state.archived = document.getElementById('s-archived').checked;
+  refreshQuizExtras();
   if (snap() !== before) markDirty();
 }
 
@@ -1458,6 +1489,10 @@ function moveQuestion(qid, toPageId, beforeQid) {
 document.getElementById('title-input').addEventListener('input', e => { state.title = e.target.value; markDirty(); });
 
 document.getElementById('settings-btn').onclick = () => document.getElementById('settings-modal').classList.add('active');
+// Live-toggle the passing-score input + the (now redundant) edit/single-submit
+// checkboxes when the admin clicks the Quiz-mode box — otherwise they'd have
+// to close + reopen the settings modal to see the change.
+document.getElementById('s-quiz').addEventListener('change', refreshQuizExtras);
 function closeSettings() {
   readSettingsModal();
   document.getElementById('settings-modal').classList.remove('active');
@@ -1516,8 +1551,9 @@ async function save() {
     is_quiz: !!state.is_quiz,
     open_at: state.open_at,
     close_at: state.close_at,
-    allow_edits: !!state.allow_edits,
-    single_submission: state.single_submission !== false,
+    allow_edits: !!state.is_quiz ? false : !!state.allow_edits,
+    single_submission: !!state.is_quiz ? true : state.single_submission !== false,
+    passing_score: state.is_quiz && Number.isFinite(state.passing_score) ? state.passing_score : null,
     require_verified: !!state.require_verified,
     min_account_age_days: state.min_account_age_days || 0,
     success_message: state.success_message || 'Thanks for your response!',

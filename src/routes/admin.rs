@@ -412,6 +412,16 @@ pub async fn create_form(
             obj.insert("title".into(), Value::String(title.clone()));
         }
     }
+    // Starter templates may carry a top-level `passing_score` so a freshly
+    // created quiz form has a sensible default threshold. It's a per-form
+    // column, not part of the user-visible schema, so pop it out before we
+    // persist `schema_value` to the JSONB column.
+    let template_passing_score: Option<i32> = schema_value
+        .as_object_mut()
+        .and_then(|o| o.remove("passing_score"))
+        .and_then(|v| v.as_i64())
+        .and_then(|n| i32::try_from(n).ok())
+        .filter(|n| (0..=1_000_000).contains(n));
     let parsed: FormSchema = serde_json::from_value(schema_value.clone())
         .map_err(|e| AppError::Internal(format!("starter template invalid: {e}")))?;
 
@@ -426,6 +436,13 @@ pub async fn create_form(
     let is_quiz = parsed
         .iter_questions()
         .any(|q| q.correct.is_some() || q.points.is_some());
+    // Only quiz forms have a meaningful passing threshold; ignore the field
+    // on non-quiz starters so a stray template value doesn't leak through.
+    let passing_score = if is_quiz {
+        template_passing_score
+    } else {
+        None
+    };
 
     // Insert with collision retry on slug.
     let preview_token = random_preview_token();
@@ -437,8 +454,9 @@ pub async fn create_form(
         }
         let slug = random_slug();
         let res = sqlx::query_as::<_, (uuid::Uuid,)>(
-            "INSERT INTO forms (guild_id, slug, title, description, schema, is_quiz, preview_token) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            "INSERT INTO forms (guild_id, slug, title, description, schema, is_quiz, \
+                                 passing_score, preview_token) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
         )
         .bind(&guild_id)
         .bind(&slug)
@@ -446,6 +464,7 @@ pub async fn create_form(
         .bind(&description)
         .bind(&schema_value)
         .bind(is_quiz)
+        .bind(passing_score)
         .bind(&preview_token)
         .fetch_one(&state.pool)
         .await;
@@ -505,6 +524,7 @@ pub async fn builder_data(
         close_at: Option<chrono::DateTime<chrono::Utc>>,
         allow_edits: bool,
         single_submission: bool,
+        passing_score: Option<i32>,
         require_verified: bool,
         min_account_age_days: i32,
         success_message: String,
@@ -514,8 +534,9 @@ pub async fn builder_data(
     }
     let row = sqlx::query_as::<_, BuilderRow>(
         "SELECT id, slug, title, description, version, schema, is_quiz, \
-                open_at, close_at, allow_edits, single_submission, require_verified, \
-                min_account_age_days, success_message, preview_token, webhook_url, archived \
+                open_at, close_at, allow_edits, single_submission, passing_score, \
+                require_verified, min_account_age_days, success_message, preview_token, \
+                webhook_url, archived \
          FROM forms WHERE id = $1 AND guild_id = $2",
     )
     .bind(uuid)
@@ -558,6 +579,7 @@ pub async fn builder_data(
         "close_at": row.close_at.map(|t| t.to_rfc3339()),
         "allow_edits": row.allow_edits,
         "single_submission": row.single_submission,
+        "passing_score": row.passing_score,
         "require_verified": row.require_verified,
         "min_account_age_days": row.min_account_age_days,
         "success_message": row.success_message,
@@ -589,6 +611,8 @@ pub struct UpdateBody {
     pub allow_edits: bool,
     #[serde(default = "default_true")]
     pub single_submission: bool,
+    #[serde(default)]
+    pub passing_score: Option<i32>,
     #[serde(default)]
     pub require_verified: bool,
     #[serde(default)]
@@ -638,6 +662,13 @@ pub async fn update_form(
             "min_account_age_days must be between 0 and 3650.".into(),
         ));
     }
+    if let Some(score) = body.passing_score {
+        if !(0..=1_000_000).contains(&score) {
+            return Err(AppError::BadRequest(
+                "passing_score must be between 0 and 1,000,000.".into(),
+            ));
+        }
+    }
     if let Some(url) = body.webhook_url.as_deref() {
         if !url.is_empty() && !webhook::is_safe_url(url) {
             return Err(AppError::BadRequest(
@@ -646,13 +677,29 @@ pub async fn update_form(
         }
     }
 
+    // Force one-shot grading on quizzes regardless of what the client posted.
+    // The submit handler also belt-and-braces this, but persisting the right
+    // flags here keeps the admin UI honest and avoids "quiz but edits allowed"
+    // forms drifting back in via API clients.
+    let single_submission = body.single_submission || body.is_quiz;
+    let allow_edits = body.allow_edits && !body.is_quiz;
+    // Surveys carry no passing threshold; clearing it on toggle-off prevents
+    // a stale value from silently re-applying if the form is later flipped
+    // back to quiz mode with a different scoring scheme.
+    let passing_score = if body.is_quiz {
+        body.passing_score
+    } else {
+        None
+    };
+
     let result = sqlx::query(
         "UPDATE forms SET \
             title = $1, description = $2, schema = $3, is_quiz = $4, \
             open_at = $5, close_at = $6, allow_edits = $7, single_submission = $8, \
-            require_verified = $9, min_account_age_days = $10, success_message = $11, \
-            webhook_url = $12, archived = $13, version = version + 1, updated_at = now() \
-         WHERE id = $14 AND guild_id = $15 AND version = $16",
+            passing_score = $9, require_verified = $10, min_account_age_days = $11, \
+            success_message = $12, webhook_url = $13, archived = $14, \
+            version = version + 1, updated_at = now() \
+         WHERE id = $15 AND guild_id = $16 AND version = $17",
     )
     .bind(&body.title)
     .bind(&body.description)
@@ -660,8 +707,9 @@ pub async fn update_form(
     .bind(body.is_quiz)
     .bind(body.open_at)
     .bind(body.close_at)
-    .bind(body.allow_edits)
-    .bind(body.single_submission)
+    .bind(allow_edits)
+    .bind(single_submission)
+    .bind(passing_score)
     .bind(body.require_verified)
     .bind(body.min_account_age_days)
     .bind(&body.success_message)
@@ -846,6 +894,7 @@ pub async fn duplicate_form(
             bool,
             bool,
             bool,
+            Option<i32>,
             bool,
             i32,
             String,
@@ -853,7 +902,8 @@ pub async fn duplicate_form(
         ),
     >(
         "SELECT title, description, schema, is_quiz, allow_edits, single_submission, \
-                require_verified, min_account_age_days, success_message, webhook_url \
+                passing_score, require_verified, min_account_age_days, success_message, \
+                webhook_url \
          FROM forms WHERE id = $1 AND guild_id = $2",
     )
     .bind(uuid)
@@ -874,9 +924,10 @@ pub async fn duplicate_form(
         let slug = random_slug();
         let res = sqlx::query_as::<_, (uuid::Uuid,)>(
             "INSERT INTO forms (guild_id, slug, title, description, schema, is_quiz, \
-                                 allow_edits, single_submission, require_verified, \
-                                 min_account_age_days, success_message, webhook_url, preview_token) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id",
+                                 allow_edits, single_submission, passing_score, \
+                                 require_verified, min_account_age_days, success_message, \
+                                 webhook_url, preview_token) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id",
         )
         .bind(&guild_id)
         .bind(&slug)
@@ -888,8 +939,9 @@ pub async fn duplicate_form(
         .bind(src.5)
         .bind(src.6)
         .bind(src.7)
-        .bind(&src.8)
+        .bind(src.8)
         .bind(&src.9)
+        .bind(&src.10)
         .bind(&preview_token)
         .fetch_one(&state.pool)
         .await;

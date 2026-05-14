@@ -15,8 +15,11 @@ use axum_extra::extract::cookie::CookieJar;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use rand::seq::SliceRandom;
+
 use crate::error::AppError;
-use crate::models::form::FormSchema;
+use crate::models::form::{FormSchema, FormSettings};
+use crate::services::csrf;
 use crate::services::form_validator;
 use crate::services::session;
 use crate::services::webhook;
@@ -223,6 +226,11 @@ pub async fn post_submit(
         ));
     }
 
+    // CSRF: state-changing cookie-auth path. Same `Origin` allowlist that
+    // gates admin writes — without it a malicious cross-origin page could
+    // ride the victim's session cookie and submit on their behalf.
+    csrf::verify_origin(&headers, &state.allowed_origins)?;
+
     let cookie = jar
         .get(SESSION_COOKIE)
         .ok_or_else(|| AppError::UnauthorizedWith("Sign in with Discord to submit.".into()))?;
@@ -243,6 +251,7 @@ pub async fn post_submit(
         is_quiz: bool,
         single_submission: bool,
         allow_edits: bool,
+        passing_score: Option<i32>,
         open_at: Option<chrono::DateTime<chrono::Utc>>,
         close_at: Option<chrono::DateTime<chrono::Utc>>,
         require_verified: bool,
@@ -254,8 +263,8 @@ pub async fn post_submit(
 
     let row = sqlx::query_as::<_, SubmitRow>(
         "SELECT id, guild_id, title, version, schema, is_quiz, single_submission, allow_edits, \
-                open_at, close_at, require_verified, min_account_age_days, success_message, \
-                webhook_url, archived \
+                passing_score, open_at, close_at, require_verified, min_account_age_days, \
+                success_message, webhook_url, archived \
          FROM forms WHERE slug = $1 FOR SHARE",
     )
     .bind(&slug)
@@ -269,8 +278,14 @@ pub async fn post_submit(
     let version = row.version;
     let schema_json = row.schema;
     let is_quiz = row.is_quiz;
-    let single_submission = row.single_submission;
-    let allow_edits = row.allow_edits;
+    // Quizzes are always one-shot regardless of admin setting: unlimited
+    // resubmits or re-grading on an edit each leak an oracle (submit → see
+    // outcome → tweak → resubmit). The admin UI also forces these on save,
+    // but enforcing here is defense in depth for forms saved before that
+    // change shipped.
+    let single_submission = row.single_submission || is_quiz;
+    let allow_edits = row.allow_edits && !is_quiz;
+    let passing_score = row.passing_score;
     let open_at = row.open_at;
     let close_at = row.close_at;
     let require_verified = row.require_verified;
@@ -434,12 +449,29 @@ pub async fn post_submit(
 
     tx.commit().await?;
 
-    Ok(Json(json!({
-        "success": true,
-        "message": success_message,
-        "total_score": total_score,
-        "response_id": response_id.map(|i| i.to_string()),
-    })))
+    if is_quiz {
+        // Pass/fail only — never echo `total_score`. The raw score is a
+        // brute-force oracle (and a memorisation aid for shared-link cheating).
+        // `passing_score == None` is treated as "any successful submission
+        // counts", which matches the pre-threshold behaviour for legacy quiz
+        // forms that don't set a threshold yet.
+        let passed = match (total_score, passing_score) {
+            (Some(s), Some(t)) => s >= t,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        Ok(Json(json!({
+            "success": true,
+            "message": success_message,
+            "passed": passed,
+        })))
+    } else {
+        Ok(Json(json!({
+            "success": true,
+            "message": success_message,
+            "response_id": response_id.map(|i| i.to_string()),
+        })))
+    }
 }
 
 pub async fn get_done() -> impl IntoResponse {
@@ -558,6 +590,60 @@ h1 {{ color: #a78bfa; font-size: 26px; margin-bottom: 12px; }}
 
 const RENDER_TEMPLATE: &str = include_str!("../../templates/render.html");
 
+/// Strip server-side grading metadata (`correct`, `points`) from every
+/// question in the schema before it's sent to the browser. The fields stay
+/// in the DB row and are read server-side by `compute_quiz_score`; the
+/// client copy must never contain them.
+fn redact_answer_keys(schema: &mut Value) {
+    let Some(pages) = schema.get_mut("pages").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for page in pages {
+        let Some(questions) = page.get_mut("questions").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for q in questions {
+            if let Some(obj) = q.as_object_mut() {
+                obj.remove("correct");
+                obj.remove("points");
+            }
+        }
+    }
+}
+
+/// Shuffle question order within each page and option order on each
+/// choice-style question. New `thread_rng()` per call → reloads reshuffle.
+/// `shuffle_options` is gated on `is_quiz` because surveys often have a
+/// meaningful option order (e.g. "Strongly disagree → Strongly agree").
+fn shuffle_schema(schema: &mut Value, shuffle_options: bool) {
+    let mut rng = rand::thread_rng();
+    let Some(pages) = schema.get_mut("pages").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for page in pages {
+        let Some(questions) = page.get_mut("questions").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        questions.shuffle(&mut rng);
+        if !shuffle_options {
+            continue;
+        }
+        for q in questions {
+            let kind = q
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !matches!(kind.as_str(), "single_choice" | "multi_choice" | "dropdown") {
+                continue;
+            }
+            if let Some(opts) = q.get_mut("options").and_then(Value::as_array_mut) {
+                opts.shuffle(&mut rng);
+            }
+        }
+    }
+}
+
 fn render_form_page(
     base_url: &str,
     form: &FormRow,
@@ -566,13 +652,38 @@ fn render_form_page(
     display_name: &str,
     preview: bool,
 ) -> Response {
+    // Two transforms before we serialise the schema to the browser:
+    //
+    //   1. **Redact answer keys.** The `correct` / `points` fields on each
+    //      question are server-side grading metadata. Sending them to the
+    //      browser hands every respondent the answer key in plain JSON.
+    //      `compute_quiz_score` reads them from the DB row server-side, so
+    //      stripping them from the client copy is purely additive.
+    //
+    //   2. **Shuffle.** Static question/option order lets users memorise
+    //      and share answer keys ("question 3, option B"). Shuffle per
+    //      page-load on quizzes (always) and on non-quizzes when the admin
+    //      opted in via `shuffle_questions`. Answers are keyed by question
+    //      and option `id`, not position, so reorder is transparent to
+    //      submit and validation.
+    let parsed_settings: FormSettings = form
+        .schema
+        .get("settings")
+        .and_then(|v| serde_json::from_value::<FormSettings>(v.clone()).ok())
+        .unwrap_or_default();
+    let mut prepared_schema = form.schema.clone();
+    redact_answer_keys(&mut prepared_schema);
+    if form.is_quiz || parsed_settings.shuffle_questions {
+        shuffle_schema(&mut prepared_schema, form.is_quiz);
+    }
+
     // Embed the schema + form metadata as JSON for the JS to consume.
     let bootstrap = json!({
         "slug": slug,
         "title": form.title,
         "description": form.description,
         "version": form.version,
-        "schema": form.schema,
+        "schema": prepared_schema,
         "is_quiz": form.is_quiz,
         "preview": preview,
         "discord_id": discord_id,
@@ -588,4 +699,191 @@ fn render_form_page(
         .replace("__DESCRIPTION__", &escape_html(&form.description))
         .replace("__SLUG__", &escape_html(slug));
     html_response(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashSet;
+
+    fn quiz_schema() -> Value {
+        // Two pages, three answerable questions with grading metadata, plus
+        // option lists on the choice questions. The shapes mirror what the
+        // admin builder writes (FormSchema → serde_json::to_value).
+        json!({
+            "title": "T",
+            "description": "",
+            "settings": {},
+            "pages": [
+                {
+                    "id": "p1",
+                    "title": "",
+                    "description": "",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "kind": "single_choice",
+                            "title": "Q1",
+                            "options": [
+                                {"id": "a", "label": "A"},
+                                {"id": "b", "label": "B"},
+                                {"id": "c", "label": "C"},
+                                {"id": "d", "label": "D"},
+                            ],
+                            "correct": "b",
+                            "points": 1,
+                        },
+                        {
+                            "id": "q2",
+                            "kind": "multi_choice",
+                            "title": "Q2",
+                            "options": [
+                                {"id": "x", "label": "X"},
+                                {"id": "y", "label": "Y"},
+                                {"id": "z", "label": "Z"},
+                                {"id": "w", "label": "W"},
+                            ],
+                            "correct": ["x", "z"],
+                            "points": 2,
+                        },
+                    ],
+                },
+                {
+                    "id": "p2",
+                    "title": "",
+                    "description": "",
+                    "questions": [
+                        {
+                            "id": "q3",
+                            "kind": "short_text",
+                            "title": "Q3",
+                            "correct": "blue",
+                            "points": 1,
+                        },
+                    ],
+                },
+            ],
+        })
+    }
+
+    #[test]
+    fn redact_strips_correct_and_points_everywhere() {
+        let mut s = quiz_schema();
+        redact_answer_keys(&mut s);
+        for page in s["pages"].as_array().unwrap() {
+            for q in page["questions"].as_array().unwrap() {
+                assert!(
+                    q.get("correct").is_none(),
+                    "found `correct` on question {q:?}"
+                );
+                assert!(
+                    q.get("points").is_none(),
+                    "found `points` on question {q:?}"
+                );
+                // Sanity: non-secret fields survive.
+                assert!(q.get("id").is_some());
+                assert!(q.get("kind").is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn redact_no_panic_on_malformed_schema() {
+        // Empty / weird shapes should be left alone without panicking — the
+        // builder validator catches malformed schemas elsewhere; here we
+        // just need defensive walking.
+        let mut empty = json!({});
+        redact_answer_keys(&mut empty);
+        let mut wrong_shape = json!({"pages": "not-an-array"});
+        redact_answer_keys(&mut wrong_shape);
+        let mut nested_wrong = json!({"pages": [{"questions": 42}]});
+        redact_answer_keys(&mut nested_wrong);
+    }
+
+    fn question_ids(schema: &Value) -> Vec<String> {
+        schema["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|p| p["questions"].as_array().unwrap().iter())
+            .map(|q| q["id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn option_ids(schema: &Value, qid: &str) -> Vec<String> {
+        schema["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|p| p["questions"].as_array().unwrap().iter())
+            .find(|q| q["id"].as_str() == Some(qid))
+            .and_then(|q| q.get("options").and_then(|o| o.as_array()))
+            .map(|opts| {
+                opts.iter()
+                    .map(|o| o["id"].as_str().unwrap().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn shuffle_preserves_question_set() {
+        // Shuffling reorders but never loses or duplicates ids — the
+        // submit handler keys by id, so any data loss would silently fail
+        // grading for legit users.
+        let original = quiz_schema();
+        let original_set: HashSet<String> = question_ids(&original).into_iter().collect();
+        let original_opts: HashSet<String> = option_ids(&original, "q1").into_iter().collect();
+        for _ in 0..20 {
+            let mut s = original.clone();
+            shuffle_schema(&mut s, true);
+            let got: HashSet<String> = question_ids(&s).into_iter().collect();
+            assert_eq!(got, original_set);
+            let got_opts: HashSet<String> = option_ids(&s, "q1").into_iter().collect();
+            assert_eq!(got_opts, original_opts);
+        }
+    }
+
+    #[test]
+    fn shuffle_actually_reorders_eventually() {
+        // Probabilistic check that the shuffle isn't a no-op. With 2 pages
+        // (3 questions over 4! × 3! × 4! = 13,824 arrangements counting
+        // options), 30 trials missing every reorder is vanishingly small.
+        let original = quiz_schema();
+        let baseline = question_ids(&original);
+        let mut saw_different_questions = false;
+        let mut saw_different_options = false;
+        for _ in 0..30 {
+            let mut s = original.clone();
+            shuffle_schema(&mut s, true);
+            if question_ids(&s) != baseline {
+                saw_different_questions = true;
+            }
+            if option_ids(&s, "q1") != option_ids(&original, "q1") {
+                saw_different_options = true;
+            }
+            if saw_different_questions && saw_different_options {
+                return;
+            }
+        }
+        panic!(
+            "shuffle_schema appears to be a no-op (questions reordered: {}, \
+             options reordered: {})",
+            saw_different_questions, saw_different_options
+        );
+    }
+
+    #[test]
+    fn shuffle_options_off_for_non_quiz() {
+        // Surveys often have meaningful option order (1-5 Likert), so
+        // option-shuffle is gated on the quiz flag.
+        let original = quiz_schema();
+        let baseline_opts = option_ids(&original, "q1");
+        for _ in 0..30 {
+            let mut s = original.clone();
+            shuffle_schema(&mut s, false);
+            assert_eq!(option_ids(&s, "q1"), baseline_opts);
+        }
+    }
 }
