@@ -91,7 +91,8 @@ impl AppConfig {
             rl_dashboard_origin: env::var("RL_DASHBOARD_ORIGIN")
                 .ok()
                 .map(|s| s.trim().trim_end_matches('/').to_string())
-                .filter(|s| !s.is_empty()),
+                .filter(|s| !s.is_empty())
+                .or_else(|| Some("https://rolelogic.faizo.net".to_string())),
             rolelogic_api_url: env::var("ROLELOGIC_API_URL")
                 .ok()
                 .map(|s| s.trim().trim_end_matches('/').to_string())
