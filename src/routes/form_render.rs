@@ -678,6 +678,9 @@ fn render_form_page(
     }
 
     // Embed the schema + form metadata as JSON for the JS to consume.
+    // `guild_id` is intrinsic to the form (one form belongs to exactly one
+    // guild), so the per-guild opt-out clearing runs against the form's
+    // guild without needing a `?guild=` URL parameter.
     let bootstrap = json!({
         "slug": slug,
         "title": form.title,
@@ -689,6 +692,7 @@ fn render_form_page(
         "discord_id": discord_id,
         "display_name": display_name,
         "base_url": base_url,
+        "guild_id": form.guild_id,
     })
     .to_string();
 
