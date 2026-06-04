@@ -657,7 +657,7 @@ async function applyGuildContext() {
   if (!guildId) return;
   let prefs;
   try {
-    prefs = await gatewayApi('GET', '/auth/preferences');
+    prefs = await gatewayApi('GET', '/auth/preferences?ensure_guild=' + encodeURIComponent(guildId));
   } catch (e) {
     // Not fatal — the form still works; we just don't show the banner.
     return;
