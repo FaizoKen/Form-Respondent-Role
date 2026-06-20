@@ -684,6 +684,13 @@ pub async fn update_form(
     let parsed: FormSchema = serde_json::from_value(schema_value.clone())
         .map_err(|e| AppError::BadRequest(format!("Schema is not a valid form definition: {e}")))?;
     form_validator::sanity_check(&parsed).map_err(|errs| AppError::BadRequest(errs.join(" ")))?;
+    // Quiz answer keys are only meaningful on quiz forms; checking them here
+    // (rather than in `sanity_check`) keeps non-quiz saves from tripping over
+    // stale `correct`/`points` left behind when quiz mode was toggled off.
+    if body.is_quiz {
+        form_validator::validate_quiz_keys(&parsed)
+            .map_err(|errs| AppError::BadRequest(errs.join(" ")))?;
+    }
 
     if body.min_account_age_days < 0 || body.min_account_age_days > 3650 {
         return Err(AppError::BadRequest(
@@ -798,6 +805,13 @@ pub async fn update_form(
     .fetch_all(&state.pool)
     .await?;
     let mut warnings: Vec<String> = Vec::new();
+    if body.is_quiz && form_validator::quiz_graded_count(&parsed) == 0 {
+        warnings.push(
+            "Quiz mode is on but no questions are graded yet — mark a correct answer (and give it \
+             points) so submissions can be scored."
+                .into(),
+        );
+    }
     let qids: std::collections::HashSet<&str> =
         parsed.iter_questions().map(|q| q.id.as_str()).collect();
     for (gid, rid) in &bound_role_links {

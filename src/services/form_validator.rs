@@ -259,45 +259,122 @@ fn looks_like_email(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
 }
 
+/// Upper bound on the points a single quiz question may award. Mirrors the
+/// per-form `passing_score` ceiling so a 50-question quiz can still out-score
+/// any reachable threshold.
+pub const MAX_QUESTION_POINTS: i32 = 1_000_000;
+
+/// Collect the accepted-answer list from a question's `correct` field.
+///
+/// Admins may store a single value (one accepted answer) or an array (any of
+/// several accepted answers for text, or the full set of correct option ids
+/// for checkboxes). Blank entries are dropped so a stray empty string can't
+/// accidentally match an unanswered question.
+fn accepted_answers(correct: &Value) -> Vec<String> {
+    let raw = match correct {
+        Value::String(s) => vec![s.clone()],
+        Value::Number(n) => vec![n.to_string()],
+        Value::Bool(b) => vec![b.to_string()],
+        Value::Array(a) => a
+            .iter()
+            .filter_map(|v| match v {
+                Value::String(s) => Some(s.clone()),
+                Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .collect(),
+        _ => vec![],
+    };
+    raw.into_iter().filter(|s| !s.trim().is_empty()).collect()
+}
+
+/// Parse a JSON answer value (number or numeric string) to f64. Number answers
+/// are stored as strings by `validate`, but accept raw JSON numbers too.
+fn as_number(v: &Value) -> Option<f64> {
+    match v {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// Whether a question is actually graded: it awards positive points AND
+/// carries a non-empty answer key. Both are required for it to count.
+pub fn is_graded(q: &Question) -> bool {
+    q.points.map(|p| p > 0).unwrap_or(false)
+        && q
+            .correct
+            .as_ref()
+            .map(|c| !accepted_answers(c).is_empty())
+            .unwrap_or(false)
+}
+
+/// Count how many questions will award points. Used to warn admins who turned
+/// on quiz mode but haven't marked any correct answers yet.
+pub fn quiz_graded_count(schema: &FormSchema) -> usize {
+    schema.iter_questions().filter(|q| is_graded(q)).count()
+}
+
 /// Compute the quiz total score for a verified answer set against the schema.
-/// Awards `points` for an exact match against `correct`; absent/wrong → 0.
+///
+/// A question contributes its `points` when it is graded (see [`is_graded`])
+/// AND the respondent's answer matches the key. Matching is intentionally
+/// forgiving so quizzes "just work":
+///   - choice questions match on option id (single/dropdown: the marked id;
+///     checkboxes: the exact marked set, no partial credit);
+///   - text/email answers match case-insensitively after trimming, against any
+///     of the accepted answers;
+///   - number/scale answers match numerically (so "5" == "5.0");
+///   - date (and any other) answers fall back to an exact trimmed match.
 pub fn compute_quiz_score(schema: &FormSchema, verified: &VerifiedAnswers) -> i32 {
     let mut total = 0i32;
     for q in schema.iter_questions() {
         let Some(points) = q.points else {
             continue;
         };
+        if points <= 0 {
+            continue;
+        }
         let Some(correct) = q.correct.as_ref() else {
             continue;
         };
         let Some(actual) = verified.get(&q.id) else {
             continue;
         };
+
         let matched = match q.kind {
             QuestionKind::MultiChoice => {
-                // For multi-choice, correct is a JSON array; require set equality.
-                let want = correct
+                // Checkboxes: the chosen set must exactly equal the marked set.
+                let want: HashSet<String> = accepted_answers(correct).into_iter().collect();
+                let got: HashSet<String> = actual
                     .as_array()
                     .map(|a| {
                         a.iter()
                             .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect::<HashSet<_>>()
+                            .collect()
                     })
                     .unwrap_or_default();
-                let got = actual
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect::<HashSet<_>>()
-                    })
-                    .unwrap_or_default();
-                want == got
-            }
-            _ => {
-                let want = correct.as_str().unwrap_or_default();
-                let got = actual.as_str().unwrap_or_default();
                 !want.is_empty() && want == got
+            }
+            QuestionKind::Number | QuestionKind::Scale => match as_number(actual) {
+                Some(got) => accepted_answers(correct)
+                    .iter()
+                    .filter_map(|s| s.trim().parse::<f64>().ok())
+                    .any(|want| (want - got).abs() < 1e-9),
+                None => false,
+            },
+            QuestionKind::ShortText | QuestionKind::LongText | QuestionKind::Email => {
+                let got = actual.as_str().unwrap_or_default().trim().to_lowercase();
+                !got.is_empty()
+                    && accepted_answers(correct)
+                        .iter()
+                        .any(|want| want.trim().to_lowercase() == got)
+            }
+            // single_choice, dropdown, date — exact trimmed match on the
+            // canonical value (option id / ISO date string).
+            _ => {
+                let got = actual.as_str().unwrap_or_default().trim();
+                !got.is_empty() && accepted_answers(correct).iter().any(|want| want.trim() == got)
             }
         };
         if matched {
@@ -305,6 +382,60 @@ pub fn compute_quiz_score(schema: &FormSchema, verified: &VerifiedAnswers) -> i3
         }
     }
     total
+}
+
+/// Validate the answer keys on a quiz form. Catches the mistakes that silently
+/// break grading: a choice question whose `correct` references an option that
+/// no longer exists, or a point value out of range. Called at save time only
+/// for quiz forms (see `routes::admin::update_form`). The visual builder makes
+/// these unreachable, but API clients and imported templates can still hit
+/// them, so the server is the source of truth.
+pub fn validate_quiz_keys(schema: &FormSchema) -> Result<(), Vec<String>> {
+    let mut errors: Vec<String> = Vec::new();
+    for q in schema.iter_questions() {
+        let label = if q.title.trim().is_empty() {
+            q.id.as_str()
+        } else {
+            q.title.trim()
+        };
+        if let Some(points) = q.points {
+            if !(0..=MAX_QUESTION_POINTS).contains(&points) {
+                errors.push(format!(
+                    "Question \"{label}\": points must be between 0 and {MAX_QUESTION_POINTS}."
+                ));
+            }
+        }
+        let Some(correct) = q.correct.as_ref() else {
+            continue;
+        };
+        let accepted = accepted_answers(correct);
+        if accepted.is_empty() {
+            continue;
+        }
+        if matches!(
+            q.kind,
+            QuestionKind::SingleChoice | QuestionKind::MultiChoice | QuestionKind::Dropdown
+        ) {
+            let opt_ids: HashSet<&str> = q
+                .options
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect();
+            if accepted.iter().any(|id| !opt_ids.contains(id.as_str())) {
+                errors.push(format!(
+                    "Question \"{label}\": the correct answer points to an option that no longer \
+                     exists — re-mark the correct option."
+                ));
+            }
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 /// Structural sanity check on a form schema (PUT-time validator).
@@ -685,5 +816,183 @@ mod tests {
             .collect();
         let s = schema(vec![page("p1", qs)]);
         assert!(sanity_check(&s).is_err());
+    }
+
+    // ---------- quiz grading ----------
+
+    fn answers(pairs: &[(&str, Value)]) -> VerifiedAnswers {
+        let mut m = Map::new();
+        for (k, v) in pairs {
+            m.insert((*k).to_string(), v.clone());
+        }
+        m
+    }
+
+    fn graded(mut question: Question, correct: Value, points: i32) -> Question {
+        question.correct = Some(correct);
+        question.points = Some(points);
+        question
+    }
+
+    #[test]
+    fn single_choice_scores_on_option_id() {
+        let mut sc = graded(
+            q("q1", QuestionKind::SingleChoice, "Pick"),
+            serde_json::json!("opt_b"),
+            5,
+        );
+        sc.options = Some(opts(&["opt_a", "opt_b"]));
+        let s = schema(vec![page("p1", vec![sc])]);
+
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!("opt_b"))])),
+            5
+        );
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!("opt_a"))])),
+            0
+        );
+        // Unanswered → 0.
+        assert_eq!(compute_quiz_score(&s, &answers(&[])), 0);
+    }
+
+    #[test]
+    fn multi_choice_requires_exact_set() {
+        let mut mc = graded(
+            q("q1", QuestionKind::MultiChoice, "Pick all"),
+            serde_json::json!(["a", "c"]),
+            4,
+        );
+        mc.options = Some(opts(&["a", "b", "c"]));
+        let s = schema(vec![page("p1", vec![mc])]);
+
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!(["c", "a"]))])),
+            4,
+            "order-independent set equality"
+        );
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!(["a"]))])),
+            0,
+            "partial selection earns nothing"
+        );
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!(["a", "b", "c"]))])),
+            0,
+            "extra selection earns nothing"
+        );
+    }
+
+    #[test]
+    fn text_match_is_forgiving_and_multi_answer() {
+        let st = graded(
+            q("q1", QuestionKind::ShortText, "Who?"),
+            serde_json::json!(["ModTeam", "the mods"]),
+            3,
+        );
+        let s = schema(vec![page("p1", vec![st])]);
+
+        // case + surrounding whitespace ignored
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!("  modteam "))])),
+            3
+        );
+        // any accepted answer counts
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!("THE MODS"))])),
+            3
+        );
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!("nobody"))])),
+            0
+        );
+    }
+
+    #[test]
+    fn number_match_is_numeric() {
+        let mut nq = graded(
+            q("q1", QuestionKind::Number, "2+2?"),
+            serde_json::json!("4"),
+            2,
+        );
+        nq.min = None;
+        let s = schema(vec![page("p1", vec![nq])]);
+
+        // "4.0" stored answer still equals correct "4"
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!("4.0"))])),
+            2
+        );
+        assert_eq!(
+            compute_quiz_score(&s, &answers(&[("q1", serde_json::json!("5"))])),
+            0
+        );
+    }
+
+    #[test]
+    fn zero_points_or_missing_key_is_ungraded() {
+        // points present but zero → ungraded
+        let mut a = graded(
+            q("a", QuestionKind::ShortText, "x"),
+            serde_json::json!("yes"),
+            0,
+        );
+        a.id = "a".into();
+        // correct present, points absent → ungraded
+        let mut b = q("b", QuestionKind::ShortText, "y");
+        b.correct = Some(serde_json::json!("yes"));
+        b.points = None;
+        let s = schema(vec![page("p1", vec![a, b])]);
+        assert_eq!(quiz_graded_count(&s), 0);
+        assert_eq!(
+            compute_quiz_score(
+                &s,
+                &answers(&[("a", serde_json::json!("yes")), ("b", serde_json::json!("yes"))])
+            ),
+            0
+        );
+    }
+
+    // ---------- quiz answer-key validation ----------
+
+    #[test]
+    fn validate_quiz_keys_flags_stale_option_id() {
+        let mut sc = graded(
+            q("q1", QuestionKind::SingleChoice, "Pick"),
+            serde_json::json!("ghost"), // not in options
+            5,
+        );
+        sc.options = Some(opts(&["a", "b"]));
+        let s = schema(vec![page("p1", vec![sc])]);
+        assert!(validate_quiz_keys(&s).is_err());
+    }
+
+    #[test]
+    fn validate_quiz_keys_accepts_valid_keys() {
+        let mut sc = graded(
+            q("q1", QuestionKind::SingleChoice, "Pick"),
+            serde_json::json!("b"),
+            5,
+        );
+        sc.options = Some(opts(&["a", "b"]));
+        let text = graded(
+            q("q2", QuestionKind::ShortText, "Who?"),
+            serde_json::json!(["mods", "staff"]),
+            5,
+        );
+        let s = schema(vec![page("p1", vec![sc, text])]);
+        validate_quiz_keys(&s).expect("valid keys should pass");
+        assert_eq!(quiz_graded_count(&s), 2);
+    }
+
+    #[test]
+    fn validate_quiz_keys_rejects_out_of_range_points() {
+        let key = graded(
+            q("q1", QuestionKind::ShortText, "x"),
+            serde_json::json!("y"),
+            MAX_QUESTION_POINTS + 1,
+        );
+        let s = schema(vec![page("p1", vec![key])]);
+        assert!(validate_quiz_keys(&s).is_err());
     }
 }

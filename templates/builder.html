@@ -566,8 +566,55 @@ main {
   transition: all var(--ease);
 }
 .inspector .opt-row .x:hover { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
+/* Inline "mark correct" control on each option row (quiz mode). Click the
+   box left of an option to mark it the/a correct answer — no option ids to
+   type. Radio for single-answer kinds, checkbox for checkboxes. */
+.inspector .opt-row .opt-correct {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color var(--ease), background var(--ease);
+}
+.inspector .opt-row .opt-correct:hover { border-color: var(--success-border); }
+.inspector .opt-row .opt-correct.is-correct { background: var(--success-bg); border-color: var(--success-border); }
+.inspector .opt-row .opt-correct input { width: 15px; height: 15px; margin: 0; accent-color: var(--success-text); cursor: pointer; }
+.quiz-section {
+  margin-top: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-sm);
+  background: rgba(252, 211, 77, 0.05);
+}
+.quiz-section .quiz-h {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--warn-text);
+  font-size: 10.5px;
+  margin: 0 0 2px;
+}
+.quiz-section label:first-of-type { margin-top: 8px; }
 .inspector hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .muted { color: var(--text-faint); font-size: 12px; line-height: 1.55; }
+/* Per-question "graded" pill on the canvas card. */
+.q-graded {
+  font-size: 10.5px;
+  color: var(--success-text);
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 600;
+  white-space: nowrap;
+  align-self: center;
+}
 
 #add-opt {
   margin-top: 8px;
@@ -948,9 +995,13 @@ main {
           <label class="check"><input type="checkbox" id="s-quiz"> Quiz mode (auto-grade answers)</label>
           <div id="s-quiz-extra" style="display:none;margin-top:8px;padding-left:24px;">
             <label style="margin-top:0;">Passing score <span style="text-transform:none;font-weight:400;color:var(--text-faint);">(optional)</span></label>
-            <input id="s-passing-score" type="number" min="0" max="1000000" placeholder="e.g. 8">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <input id="s-passing-score" type="number" min="0" max="1000000" placeholder="e.g. 8" style="flex:0 0 auto;width:120px;">
+              <span class="muted" id="s-total-points">out of 0 points</span>
+            </div>
+            <p class="muted" id="s-quiz-warning" style="display:none;margin-top:8px;color:var(--warn-text);"></p>
             <p class="muted" style="margin-top:6px;">Respondents see <em>passed</em> or <em>not passed</em>—never the raw score. Leave blank to accept any submission as passing.</p>
-            <p class="muted" style="margin-top:6px;">Quiz mode also forces one submission per person with no edits, and shuffles question and option order on every page load.</p>
+            <p class="muted" style="margin-top:6px;">Mark each question's correct answer in the question editor. Quiz mode also forces one submission per person with no edits, and shuffles question and option order on every page load.</p>
           </div>
         </div>
       </div>
@@ -1072,6 +1123,35 @@ let dragQid = null;
 
 function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
 
+// --- Quiz answer-key helpers --------------------------------------------
+// `correct` is stored as the marked option id (single/dropdown), an array of
+// ids (checkboxes), or one/many accepted text answers. These helpers read it
+// uniformly so the inspector never asks the admin to type an option id.
+function isChoiceKind(k){ return k==='single_choice' || k==='multi_choice' || k==='dropdown'; }
+function correctSet(q){
+  const c=q.correct;
+  if(Array.isArray(c)) return new Set(c.map(String));
+  if(typeof c==='string' && c.trim()!=='') return new Set([c]);
+  if(typeof c==='number') return new Set([String(c)]);
+  return new Set();
+}
+function hasCorrect(q){ return correctSet(q).size>0; }
+function correctLines(q){
+  const c=q.correct;
+  if(Array.isArray(c)) return c.join('\n');
+  return c==null?'':String(c);
+}
+function firstCorrect(q){
+  const c=q.correct;
+  if(Array.isArray(c)) return c.length?String(c[0]):'';
+  return c==null?'':String(c);
+}
+// Default a graded question to 1 point so marking a correct answer is enough
+// to make it count — a 0/blank points value silently scores nothing.
+function effPoints(q){ return (q.points==null) ? 1 : q.points; }
+function isGraded(q){ return effPoints(q)>0 && hasCorrect(q); }
+function ensurePoints(q){ if(hasCorrect(q) && (q.points==null || q.points===0)) q.points=1; }
+
 function showToast(msg, kind) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -1182,7 +1262,32 @@ function refreshQuizExtras() {
   }
   edits.disabled = quiz;
   single.disabled = quiz;
+  if (quiz) updateQuizSummary();
   refreshRetryControls();
+}
+
+// Total points + graded-question count shown beside the passing-score field,
+// plus a nudge when quiz mode is on but nothing is graded yet.
+function updateQuizSummary() {
+  let total = 0, graded = 0;
+  for (const p of (state.schema.pages || [])) {
+    for (const q of (p.questions || [])) {
+      if (isGraded(q)) { graded++; total += effPoints(q); }
+    }
+  }
+  const tp = document.getElementById('s-total-points');
+  if (tp) {
+    tp.textContent = `out of ${total} point${total === 1 ? '' : 's'} · ${graded} graded question${graded === 1 ? '' : 's'}`;
+  }
+  const warn = document.getElementById('s-quiz-warning');
+  if (warn) {
+    if (graded === 0) {
+      warn.style.display = 'block';
+      warn.textContent = '⚠ No questions are graded yet. Open a question and tick its correct answer so submissions can be scored.';
+    } else {
+      warn.style.display = 'none';
+    }
+  }
 }
 
 // Retries only apply when the form keeps a single canonical response: quiz
@@ -1318,9 +1423,13 @@ function renderQuestion(q, pageId) {
   wrap.dataset.qid = q.id;
   wrap.dataset.pid = pageId;
   const kindLabel = q.kind.replace(/_/g, ' ');
+  const gradedBadge = (state.is_quiz && isGraded(q))
+    ? `<span class="q-graded" title="Graded question">✓ ${effPoints(q)} pt</span>`
+    : '';
   wrap.innerHTML = `
     <div class="q-head">
       <span class="q-kind">${escapeHtml(kindLabel)}${q.required ? ' • required' : ''}</span>
+      ${gradedBadge}
       <input class="q-title" data-q-title="${escapeHtml(q.id)}" value="${escapeHtml(q.title)}" aria-label="Question title">
       <div class="q-actions">
         <button data-dup="${escapeHtml(q.id)}" title="Duplicate question" aria-label="Duplicate question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
@@ -1438,17 +1547,46 @@ function selectQ(qid) {
     h += `<label>Min</label><input type="number" data-i="min" value="${q.min ?? ''}">`;
     h += `<label>Max</label><input type="number" data-i="max" value="${q.max ?? ''}">`;
   }
-  if (q.kind === 'single_choice' || q.kind === 'multi_choice' || q.kind === 'dropdown') {
-    h += `<label>Options</label><div id="opts">${(q.options||[]).map((o,i)=>`<div class="opt-row"><input type="text" data-opt="${i}" value="${escapeHtml(o.label)}" placeholder="Option label"><button class="x" data-opt-del="${i}" aria-label="Remove option">×</button></div>`).join('')}</div><button class="btn" id="add-opt" type="button">+ Add option</button>`;
+  // Quiz grading applies to every answerable kind except agreements.
+  const quizOn = !!state.is_quiz && q.kind !== 'info' && q.kind !== 'agreement'
+    && q.kind !== 'image' && q.kind !== 'video';
+  const choice = isChoiceKind(q.kind);
+
+  if (choice) {
+    const marked = correctSet(q);
+    const optsHtml = (q.options || []).map((o, i) => {
+      let mark = '';
+      if (quizOn) {
+        const type = q.kind === 'multi_choice' ? 'checkbox' : 'radio';
+        const on = marked.has(String(o.id));
+        mark = `<label class="opt-correct${on ? ' is-correct' : ''}" title="Mark this option correct"><input type="${type}" data-correct-opt="${escapeHtml(o.id)}" name="correct-${escapeHtml(q.id)}" ${on ? 'checked' : ''} aria-label="Mark option correct"></label>`;
+      }
+      return `<div class="opt-row">${mark}<input type="text" data-opt="${i}" value="${escapeHtml(o.label)}" placeholder="Option label"><button class="x" data-opt-del="${i}" aria-label="Remove option">×</button></div>`;
+    }).join('');
+    const optLabel = quizOn
+      ? `Options <span style="text-transform:none;font-weight:400;color:var(--text-faint);">— tick the correct ${q.kind === 'multi_choice' ? 'answers' : 'answer'}</span>`
+      : 'Options';
+    h += `<label>${optLabel}</label><div id="opts">${optsHtml}</div><button class="btn" id="add-opt" type="button">+ Add option</button>`;
   }
-  if (state.is_quiz && q.kind !== 'info' && q.kind !== 'agreement') {
-    h += `<hr><div class="muted" style="font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--warn-text);font-size:11px;">Quiz</div>`;
-    if (q.kind === 'multi_choice') {
-      h += `<label>Correct answers (option ids, comma-separated)</label><input type="text" data-i="correct" value="${escapeHtml(Array.isArray(q.correct) ? q.correct.join(',') : '')}">`;
+
+  if (quizOn) {
+    h += `<hr><div class="quiz-section"><div class="quiz-h">Quiz grading</div>`;
+    if (choice) {
+      const n = correctSet(q).size;
+      h += n
+        ? `<p class="muted" style="margin:6px 0 0;">${n} correct option${n === 1 ? '' : 's'} ticked above.</p>`
+        : `<p class="muted" style="margin:6px 0 0;color:var(--warn-text);">Tick the correct ${q.kind === 'multi_choice' ? 'option(s)' : 'option'} above to grade this question.</p>`;
+    } else if (q.kind === 'number' || q.kind === 'scale') {
+      h += `<label style="margin-top:0;">Correct answer</label><input type="number" data-i="correct-num" value="${escapeHtml(firstCorrect(q))}" placeholder="e.g. 42">`;
+    } else if (q.kind === 'date') {
+      h += `<label style="margin-top:0;">Correct answer</label><input type="date" data-i="correct-num" value="${escapeHtml(firstCorrect(q))}">`;
     } else {
-      h += `<label>Correct answer</label><input type="text" data-i="correct" value="${escapeHtml(q.correct || '')}">`;
+      // short_text / long_text / email
+      h += `<label style="margin-top:0;">Accepted answers <span style="text-transform:none;font-weight:400;color:var(--text-faint);">— one per line; case &amp; spacing ignored</span></label><textarea data-i="correct-text" placeholder="Type each accepted answer on its own line">${escapeHtml(correctLines(q))}</textarea>`;
     }
-    h += `<label>Points (when correct)</label><input type="number" data-i="points" value="${q.points || 0}">`;
+    const showPointsHint = !hasCorrect(q);
+    h += `<label>Points${showPointsHint ? ` <span style="text-transform:none;font-weight:400;color:var(--text-faint);">— counts once an answer is set</span>` : ''}</label><input type="number" min="0" data-i="points" value="${q.points == null ? 1 : q.points}">`;
+    h += `</div>`;
   }
   document.getElementById('inspector-body').innerHTML = h;
 }
@@ -1459,10 +1597,26 @@ document.getElementById('inspector').addEventListener('input', e => {
   if (!q) return;
   const t = e.target;
   const key = t.dataset.i;
-  if (key) {
+  if (key === 'correct-text') {
+    // Text answer key: one accepted answer per line. Store a bare string for a
+    // single answer, an array for several; blanks dropped.
+    const arr = t.value.split('\n').map(s => s.trim()).filter(Boolean);
+    q.correct = arr.length > 1 ? arr : (arr[0] || '');
+    ensurePoints(q);
+    markDirty();
+    render();
+  } else if (key === 'correct-num') {
+    q.correct = t.value.trim();
+    ensurePoints(q);
+    markDirty();
+    render();
+  } else if (key === 'points') {
+    q.points = t.value === '' ? null : Math.max(0, parseInt(t.value, 10) || 0);
+    markDirty();
+    render();
+  } else if (key) {
     if (t.type === 'checkbox') q[key] = t.checked;
     else if (t.type === 'number') q[key] = t.value === '' ? null : parseFloat(t.value);
-    else if (key === 'correct' && q.kind === 'multi_choice') q[key] = t.value.split(',').map(s => s.trim()).filter(Boolean);
     else q[key] = t.value;
     markDirty();
     render();
@@ -1476,6 +1630,24 @@ document.getElementById('inspector').addEventListener('input', e => {
 document.getElementById('inspector').addEventListener('click', e => {
   const [, q] = findQuestion(selectedQid);
   if (!q) return;
+  // Mark / unmark a correct option (quiz mode). Clicking the box stores the
+  // option id directly — the admin never sees or types ids.
+  const correctInput = e.target.closest('input[data-correct-opt]');
+  if (correctInput) {
+    const id = correctInput.dataset.correctOpt;
+    if (q.kind === 'multi_choice') {
+      const set = correctSet(q);
+      if (set.has(id)) set.delete(id); else set.add(id);
+      q.correct = Array.from(set);
+    } else {
+      // Radio: re-clicking the marked option clears it (un-grades).
+      q.correct = (firstCorrect(q) === id && correctSet(q).size === 1) ? '' : id;
+    }
+    ensurePoints(q);
+    markDirty();
+    selectQ(selectedQid);
+    return;
+  }
   if (e.target.id === 'add-opt') {
     q.options = q.options || [];
     q.options.push({ id: rid('o'), label: 'New option' });
@@ -1483,7 +1655,13 @@ document.getElementById('inspector').addEventListener('click', e => {
     markDirty();
   } else if (e.target.dataset.optDel != null) {
     const i = parseInt(e.target.dataset.optDel, 10);
+    const removed = q.options[i];
     q.options.splice(i, 1);
+    // Keep the answer key consistent — drop the deleted option from `correct`.
+    if (removed) {
+      if (Array.isArray(q.correct)) q.correct = q.correct.filter(x => String(x) !== String(removed.id));
+      else if (String(q.correct) === String(removed.id)) q.correct = '';
+    }
     selectQ(selectedQid);
     markDirty();
   }
