@@ -981,6 +981,34 @@ main {
         <span class="muted">days</span>
       </div>
 
+      <div id="s-retry-block" style="margin-top:16px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-2);">
+        <label style="margin-top:0;">Retries &amp; cooldown</label>
+        <p class="muted" id="s-retry-hint" style="margin:0 0 12px;">Members keep a single graded attempt; allow more tries with an optional wait between them. Requires “one submission per person” (quizzes always qualify).</p>
+        <div class="s-row2">
+          <div>
+            <input id="s-max-attempts" type="number" min="0" max="50" placeholder="1">
+            <div class="muted" style="margin-top:4px;">Attempts allowed — <strong>1</strong> = single, <strong>0</strong> = unlimited</div>
+          </div>
+          <div>
+            <div style="display:flex;gap:8px;">
+              <input id="s-cooldown-value" type="number" min="0" max="9000" placeholder="0" style="flex:1;min-width:0;">
+              <select id="s-cooldown-unit" style="flex:0 0 auto;">
+                <option value="60">minutes</option>
+                <option value="3600">hours</option>
+                <option value="86400">days</option>
+              </select>
+            </div>
+            <div class="muted" style="margin-top:4px;">Cooldown between attempts — <strong>0</strong> = none</div>
+          </div>
+        </div>
+        <div id="s-quiz-retry-extra" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">
+          <label style="margin-top:0;">When attempts have different scores</label>
+          <label class="check"><input type="radio" name="s-retry-policy" value="keep_best" checked> Keep the best attempt — highest score counts, passing is sticky</label>
+          <label class="check"><input type="radio" name="s-retry-policy" value="keep_latest"> Keep the latest attempt — most recent always replaces the previous</label>
+          <label class="check" style="margin-top:10px;"><input type="checkbox" id="s-lock-on-pass"> Stop retries once the member passes</label>
+        </div>
+      </div>
+
       <hr style="border:none;border-top:1px solid var(--border);margin:18px 0;">
 
       <label style="margin-top:0;">Success message</label>
@@ -1109,7 +1137,34 @@ function fillSettingsModal() {
   document.getElementById('s-success-msg').value = state.success_message || 'Thanks for your response!';
   document.getElementById('s-webhook-url').value = state.webhook_url || '';
   document.getElementById('s-archived').checked = !!state.archived;
+  // Retries: max_attempts defaults to 1 (single submission). Pick the
+  // largest whole time unit for the cooldown so e.g. 7200s shows as "2 hours".
+  const maxAttempts = (state.max_attempts === null || state.max_attempts === undefined) ? 1 : state.max_attempts;
+  document.getElementById('s-max-attempts').value = maxAttempts;
+  setCooldownInputs(state.retry_cooldown_seconds || 0);
+  const policy = state.retry_policy === 'keep_latest' ? 'keep_latest' : 'keep_best';
+  document.querySelectorAll('input[name="s-retry-policy"]').forEach(r => { r.checked = (r.value === policy); });
+  document.getElementById('s-lock-on-pass').checked = state.lock_on_pass !== false;
   refreshQuizExtras();
+}
+
+// Split a seconds count into the largest whole unit (days > hours > minutes)
+// for friendlier display; falls back to minutes.
+function setCooldownInputs(seconds) {
+  const valEl = document.getElementById('s-cooldown-value');
+  const unitEl = document.getElementById('s-cooldown-unit');
+  if (!seconds || seconds <= 0) { valEl.value = 0; unitEl.value = '60'; return; }
+  for (const u of [86400, 3600, 60]) {
+    if (seconds % u === 0) { valEl.value = seconds / u; unitEl.value = String(u); return; }
+  }
+  valEl.value = Math.round(seconds / 60); unitEl.value = '60';
+}
+
+function readCooldownSeconds() {
+  const v = parseInt(document.getElementById('s-cooldown-value').value || '0', 10);
+  const u = parseInt(document.getElementById('s-cooldown-unit').value || '60', 10);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return v * u;
 }
 
 // Quiz mode hides the per-submission knobs the server-side enforcement
@@ -1127,6 +1182,32 @@ function refreshQuizExtras() {
   }
   edits.disabled = quiz;
   single.disabled = quiz;
+  refreshRetryControls();
+}
+
+// Retries only apply when the form keeps a single canonical response: quiz
+// mode (always) or "one submission per person". Allowing free edits makes the
+// response openly editable, so retries don't apply there either. Gray the
+// block out (rather than hide it) so admins can see why it's inactive.
+function refreshRetryControls() {
+  const quiz = document.getElementById('s-quiz').checked;
+  const single = document.getElementById('s-single-submission').checked;
+  const edits = document.getElementById('s-allow-edits').checked;
+  const active = quiz || (single && !edits);
+  const block = document.getElementById('s-retry-block');
+  block.style.opacity = active ? '1' : '0.5';
+  ['s-max-attempts', 's-cooldown-value', 's-cooldown-unit', 's-lock-on-pass'].forEach(id => {
+    document.getElementById(id).disabled = !active;
+  });
+  document.querySelectorAll('input[name="s-retry-policy"]').forEach(r => { r.disabled = !active; });
+  // keep_best / lock-on-pass are only meaningful for graded quizzes.
+  document.getElementById('s-quiz-retry-extra').style.display = quiz ? 'block' : 'none';
+  const hint = document.getElementById('s-retry-hint');
+  if (!active) {
+    hint.textContent = 'Turn on “one submission per person” (or quiz mode) to allow retries. Freely-editable forms can already be changed anytime.';
+  } else {
+    hint.textContent = 'Members keep a single graded attempt; allow more tries with an optional wait between them.';
+  }
 }
 
 function readSettingsModal() {
@@ -1137,6 +1218,7 @@ function readSettingsModal() {
     state.is_quiz, state.passing_score, state.open_at, state.close_at,
     state.allow_edits, state.single_submission, state.require_verified,
     state.min_account_age_days, state.success_message, state.webhook_url, state.archived,
+    state.max_attempts, state.retry_cooldown_seconds, state.retry_policy, state.lock_on_pass,
   ]);
   const before = snap();
   s.submit_label = document.getElementById('s-submit-label').value || 'Submit';
@@ -1157,6 +1239,14 @@ function readSettingsModal() {
   state.success_message = document.getElementById('s-success-msg').value || 'Thanks for your response!';
   state.webhook_url = document.getElementById('s-webhook-url').value || null;
   state.archived = document.getElementById('s-archived').checked;
+  // Retries. max_attempts: clamp to 0..50 (0 = unlimited, 1 = single).
+  let maxA = parseInt(document.getElementById('s-max-attempts').value, 10);
+  if (!Number.isFinite(maxA) || maxA < 0) maxA = 1;
+  state.max_attempts = Math.min(maxA, 50);
+  state.retry_cooldown_seconds = Math.min(readCooldownSeconds(), 7776000);
+  const policyEl = document.querySelector('input[name="s-retry-policy"]:checked');
+  state.retry_policy = policyEl && policyEl.value === 'keep_latest' ? 'keep_latest' : 'keep_best';
+  state.lock_on_pass = document.getElementById('s-lock-on-pass').checked;
   refreshQuizExtras();
   if (snap() !== before) markDirty();
 }
@@ -1493,6 +1583,10 @@ document.getElementById('settings-btn').onclick = () => document.getElementById(
 // checkboxes when the admin clicks the Quiz-mode box — otherwise they'd have
 // to close + reopen the settings modal to see the change.
 document.getElementById('s-quiz').addEventListener('change', refreshQuizExtras);
+// Keep the retry block's active/disabled state in sync as the admin toggles
+// the submission-mode checkboxes, without needing to reopen the modal.
+document.getElementById('s-single-submission').addEventListener('change', refreshRetryControls);
+document.getElementById('s-allow-edits').addEventListener('change', refreshRetryControls);
 function closeSettings() {
   readSettingsModal();
   document.getElementById('settings-modal').classList.remove('active');
@@ -1559,6 +1653,10 @@ async function save() {
     success_message: state.success_message || 'Thanks for your response!',
     webhook_url: state.webhook_url || null,
     archived: !!state.archived,
+    max_attempts: Number.isFinite(state.max_attempts) ? state.max_attempts : 1,
+    retry_cooldown_seconds: state.retry_cooldown_seconds || 0,
+    retry_policy: state.retry_policy === 'keep_latest' ? 'keep_latest' : 'keep_best',
+    lock_on_pass: state.lock_on_pass !== false,
     version: state.version,
   };
   const btn = document.getElementById('save-btn');

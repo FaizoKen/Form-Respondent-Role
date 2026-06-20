@@ -531,12 +531,17 @@ pub async fn builder_data(
         preview_token: String,
         webhook_url: Option<String>,
         archived: bool,
+        max_attempts: i32,
+        retry_cooldown_seconds: i32,
+        retry_policy: String,
+        lock_on_pass: bool,
     }
     let row = sqlx::query_as::<_, BuilderRow>(
         "SELECT id, slug, title, description, version, schema, is_quiz, \
                 open_at, close_at, allow_edits, single_submission, passing_score, \
                 require_verified, min_account_age_days, success_message, preview_token, \
-                webhook_url, archived \
+                webhook_url, archived, \
+                max_attempts, retry_cooldown_seconds, retry_policy, lock_on_pass \
          FROM forms WHERE id = $1 AND guild_id = $2",
     )
     .bind(uuid)
@@ -586,6 +591,10 @@ pub async fn builder_data(
         "preview_token": row.preview_token,
         "webhook_url": row.webhook_url,
         "archived": row.archived,
+        "max_attempts": row.max_attempts,
+        "retry_cooldown_seconds": row.retry_cooldown_seconds,
+        "retry_policy": row.retry_policy,
+        "lock_on_pass": row.lock_on_pass,
         "response_count": response_count,
         "bound_role_links_count": bound_role_links_count,
     })))
@@ -623,6 +632,14 @@ pub struct UpdateBody {
     pub webhook_url: Option<String>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: i32,
+    #[serde(default)]
+    pub retry_cooldown_seconds: i32,
+    #[serde(default = "default_retry_policy")]
+    pub retry_policy: String,
+    #[serde(default = "default_true")]
+    pub lock_on_pass: bool,
     pub version: i32,
 }
 fn default_true() -> bool {
@@ -631,6 +648,17 @@ fn default_true() -> bool {
 fn default_success_message() -> String {
     "Thanks for your response!".into()
 }
+fn default_max_attempts() -> i32 {
+    1
+}
+fn default_retry_policy() -> String {
+    "keep_best".into()
+}
+
+/// Upper bounds for retry config. 50 attempts is far more than any real quiz
+/// needs; 90 days of cooldown is the practical ceiling for "come back later".
+const MAX_RETRY_ATTEMPTS: i32 = 50;
+const MAX_RETRY_COOLDOWN_SECONDS: i32 = 90 * 24 * 60 * 60;
 
 pub async fn update_form(
     State(state): State<Arc<AppState>>,
@@ -677,6 +705,27 @@ pub async fn update_form(
         }
     }
 
+    // Retry / cooldown validation. `max_attempts`: 0 = unlimited, 1 = single
+    // submission (the historical default), 2..=50 = bounded retries.
+    if !(0..=MAX_RETRY_ATTEMPTS).contains(&body.max_attempts) {
+        return Err(AppError::BadRequest(format!(
+            "max_attempts must be between 0 (unlimited) and {MAX_RETRY_ATTEMPTS}."
+        )));
+    }
+    if !(0..=MAX_RETRY_COOLDOWN_SECONDS).contains(&body.retry_cooldown_seconds) {
+        return Err(AppError::BadRequest(
+            "retry_cooldown_seconds must be between 0 and 7,776,000 (90 days).".into(),
+        ));
+    }
+    let retry_policy = match body.retry_policy.as_str() {
+        "keep_best" | "keep_latest" => body.retry_policy.clone(),
+        other => {
+            return Err(AppError::BadRequest(format!(
+                "Unknown retry_policy '{other}'. Use 'keep_best' or 'keep_latest'."
+            )))
+        }
+    };
+
     // Force one-shot grading on quizzes regardless of what the client posted.
     // The submit handler also belt-and-braces this, but persisting the right
     // flags here keeps the admin UI honest and avoids "quiz but edits allowed"
@@ -698,8 +747,10 @@ pub async fn update_form(
             open_at = $5, close_at = $6, allow_edits = $7, single_submission = $8, \
             passing_score = $9, require_verified = $10, min_account_age_days = $11, \
             success_message = $12, webhook_url = $13, archived = $14, \
+            max_attempts = $15, retry_cooldown_seconds = $16, retry_policy = $17, \
+            lock_on_pass = $18, \
             version = version + 1, updated_at = now() \
-         WHERE id = $15 AND guild_id = $16 AND version = $17",
+         WHERE id = $19 AND guild_id = $20 AND version = $21",
     )
     .bind(&body.title)
     .bind(&body.description)
@@ -715,6 +766,10 @@ pub async fn update_form(
     .bind(&body.success_message)
     .bind(body.webhook_url.as_deref().filter(|s| !s.is_empty()))
     .bind(body.archived)
+    .bind(body.max_attempts)
+    .bind(body.retry_cooldown_seconds)
+    .bind(&retry_policy)
+    .bind(body.lock_on_pass)
     .bind(uuid)
     .bind(&guild_id)
     .bind(body.version)
@@ -899,11 +954,15 @@ pub async fn duplicate_form(
             i32,
             String,
             Option<String>,
+            i32,
+            i32,
+            String,
+            bool,
         ),
     >(
         "SELECT title, description, schema, is_quiz, allow_edits, single_submission, \
                 passing_score, require_verified, min_account_age_days, success_message, \
-                webhook_url \
+                webhook_url, max_attempts, retry_cooldown_seconds, retry_policy, lock_on_pass \
          FROM forms WHERE id = $1 AND guild_id = $2",
     )
     .bind(uuid)
@@ -926,8 +985,10 @@ pub async fn duplicate_form(
             "INSERT INTO forms (guild_id, slug, title, description, schema, is_quiz, \
                                  allow_edits, single_submission, passing_score, \
                                  require_verified, min_account_age_days, success_message, \
-                                 webhook_url, preview_token) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id",
+                                 webhook_url, max_attempts, retry_cooldown_seconds, \
+                                 retry_policy, lock_on_pass, preview_token) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
+                     $16, $17, $18) RETURNING id",
         )
         .bind(&guild_id)
         .bind(&slug)
@@ -942,6 +1003,10 @@ pub async fn duplicate_form(
         .bind(src.8)
         .bind(&src.9)
         .bind(&src.10)
+        .bind(src.11)
+        .bind(src.12)
+        .bind(&src.13)
+        .bind(src.14)
         .bind(&preview_token)
         .fetch_one(&state.pool)
         .await;
@@ -1006,9 +1071,12 @@ pub async fn responses_data(
             Option<i32>,
             chrono::DateTime<chrono::Utc>,
             chrono::DateTime<chrono::Utc>,
+            i32,
+            Option<bool>,
         ),
     >(
-        "SELECT id, discord_id, answers, total_score, submitted_at, last_edited_at \
+        "SELECT id, discord_id, answers, total_score, submitted_at, last_edited_at, \
+                attempt_count, passed \
          FROM form_responses WHERE form_id = $1 ORDER BY last_edited_at DESC LIMIT 1000",
     )
     .bind(&form_id)
@@ -1017,16 +1085,20 @@ pub async fn responses_data(
 
     let responses: Vec<Value> = rows
         .into_iter()
-        .map(|(id, did, answers, score, submitted, edited)| {
-            json!({
-                "id": id.to_string(),
-                "discord_id": did,
-                "answers": answers,
-                "total_score": score,
-                "submitted_at": submitted.to_rfc3339(),
-                "last_edited_at": edited.to_rfc3339(),
-            })
-        })
+        .map(
+            |(id, did, answers, score, submitted, edited, attempt_count, passed)| {
+                json!({
+                    "id": id.to_string(),
+                    "discord_id": did,
+                    "answers": answers,
+                    "total_score": score,
+                    "submitted_at": submitted.to_rfc3339(),
+                    "last_edited_at": edited.to_rfc3339(),
+                    "attempt_count": attempt_count,
+                    "passed": passed,
+                })
+            },
+        )
         .collect();
 
     Ok(Json(json!({

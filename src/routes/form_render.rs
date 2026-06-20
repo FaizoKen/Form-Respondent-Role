@@ -21,6 +21,7 @@ use crate::error::AppError;
 use crate::models::form::{FormSchema, FormSettings};
 use crate::services::csrf;
 use crate::services::form_validator;
+use crate::services::retry::{self, ExistingAttempt, NewSubmission, RetryConfig, RetryPolicy};
 use crate::services::session;
 use crate::services::webhook;
 use crate::AppState;
@@ -39,9 +40,7 @@ struct FormRow {
     is_quiz: bool,
     open_at: Option<chrono::DateTime<chrono::Utc>>,
     close_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[allow(dead_code)]
     allow_edits: bool,
-    #[allow(dead_code)]
     single_submission: bool,
     require_verified: bool,
     min_account_age_days: i32,
@@ -53,13 +52,18 @@ struct FormRow {
     archived: bool,
     #[allow(dead_code)]
     slug: String,
+    max_attempts: i32,
+    retry_cooldown_seconds: i32,
+    retry_policy: String,
+    lock_on_pass: bool,
 }
 
 async fn load_form(state: &AppState, slug: &str) -> Result<FormRow, AppError> {
     sqlx::query_as::<_, FormRow>(
         "SELECT id, guild_id, title, description, version, schema, is_quiz, \
                 open_at, close_at, allow_edits, single_submission, require_verified, \
-                min_account_age_days, success_message, preview_token, webhook_url, archived, slug \
+                min_account_age_days, success_message, preview_token, webhook_url, archived, slug, \
+                max_attempts, retry_cooldown_seconds, retry_policy, lock_on_pass \
          FROM forms WHERE slug = $1",
     )
     .bind(slug)
@@ -75,6 +79,100 @@ fn discord_account_age_days(discord_id: &str) -> Option<i64> {
     let secs = (ms / 1000) as i64;
     let created = chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)?;
     Some((chrono::Utc::now() - created).num_days())
+}
+
+/// The member's existing canonical response, used by both the form-render
+/// status computation and the submit handler's retry enforcement.
+#[derive(Debug, sqlx::FromRow)]
+struct CanonicalAttemptRow {
+    id: uuid::Uuid,
+    attempt_count: i32,
+    total_score: Option<i32>,
+    passed: Option<bool>,
+    last_edited_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Whether a form is governed by the retry/cooldown system (single canonical
+/// response, not freely-editable). Quizzes always keep a single canonical
+/// response and never allow free edits, so they are always retry-governed.
+fn is_retry_governed(single_submission: bool, allow_edits: bool, is_quiz: bool) -> bool {
+    let single = single_submission || is_quiz;
+    let editable = allow_edits && !is_quiz;
+    single && !editable
+}
+
+fn retry_config_from_form(form: &FormRow) -> RetryConfig {
+    RetryConfig {
+        max_attempts: form.max_attempts,
+        cooldown_seconds: form.retry_cooldown_seconds as i64,
+        policy: RetryPolicy::from_str_or_default(&form.retry_policy),
+        lock_on_pass: form.lock_on_pass,
+    }
+}
+
+/// Build the `retry` object embedded in the member-facing bootstrap so the
+/// page can show the attempt counter, a cooldown countdown, and block the
+/// submit button when the member is out of attempts or already passed.
+fn build_retry_status(
+    config: &RetryConfig,
+    existing: Option<&ExistingAttempt>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Value {
+    let attempts_used = existing.map(|e| e.attempt_count).unwrap_or(0);
+    let attempts_left = if config.max_attempts > 0 {
+        Some((config.max_attempts - attempts_used).max(0))
+    } else {
+        None
+    };
+
+    let mut blocked = false;
+    let mut blocked_reason: Option<&str> = None;
+    let mut next_attempt_at: Option<chrono::DateTime<chrono::Utc>> = None;
+    let passed = existing.and_then(|e| e.passed);
+
+    if let Some(e) = existing {
+        if config.lock_on_pass && e.passed == Some(true) {
+            blocked = true;
+            blocked_reason = Some("passed");
+        } else if config.max_attempts > 0 && e.attempt_count >= config.max_attempts {
+            blocked = true;
+            blocked_reason = Some("exhausted");
+        } else if config.cooldown_seconds > 0 {
+            let next = e.last_attempt_at + chrono::Duration::seconds(config.cooldown_seconds);
+            if now < next {
+                next_attempt_at = Some(next);
+            }
+        }
+    }
+
+    json!({
+        "enabled": config.retries_enabled(),
+        "max_attempts": config.max_attempts,
+        "attempts_used": attempts_used,
+        "attempts_left": attempts_left,
+        "cooldown_seconds": config.cooldown_seconds,
+        "next_attempt_at": next_attempt_at.map(|t| t.to_rfc3339()),
+        "blocked": blocked,
+        "blocked_reason": blocked_reason,
+        "passed": passed,
+    })
+}
+
+async fn load_canonical_attempt(
+    state: &AppState,
+    form_id: &uuid::Uuid,
+    discord_id: &str,
+) -> Result<Option<CanonicalAttemptRow>, AppError> {
+    let form_id_text = form_id.to_string();
+    Ok(sqlx::query_as::<_, CanonicalAttemptRow>(
+        "SELECT id, attempt_count, total_score, passed, last_edited_at \
+         FROM form_responses WHERE form_id = $1 AND discord_id = $2 \
+         ORDER BY last_edited_at DESC LIMIT 1",
+    )
+    .bind(&form_id_text)
+    .bind(discord_id)
+    .fetch_optional(&state.pool)
+    .await?)
 }
 
 pub async fn get_form(
@@ -164,6 +262,27 @@ pub async fn get_form(
         }
     }
 
+    // Retry status: only forms that keep a single canonical response are
+    // retry-governed. Look up the member's existing attempt so the page can
+    // show "attempt 2 of 3", a cooldown countdown, or a "you've already
+    // passed / used all attempts" block. Freely-editable and unlimited forms
+    // skip this entirely (their behaviour is unchanged).
+    let retry_status = if is_retry_governed(form.single_submission, form.allow_edits, form.is_quiz)
+    {
+        let config = retry_config_from_form(&form);
+        let existing = load_canonical_attempt(&state, &form.id, &discord_id)
+            .await?
+            .map(|r| ExistingAttempt {
+                attempt_count: r.attempt_count,
+                last_attempt_at: r.last_edited_at,
+                total_score: r.total_score,
+                passed: r.passed,
+            });
+        build_retry_status(&config, existing.as_ref(), now)
+    } else {
+        Value::Null
+    };
+
     Ok(render_form_page(
         &state.config.base_url,
         &form,
@@ -171,6 +290,7 @@ pub async fn get_form(
         &discord_id,
         &display_name,
         false,
+        retry_status,
     ))
 }
 
@@ -198,6 +318,7 @@ pub async fn get_preview(
         "preview",
         "Preview",
         true,
+        Value::Null,
     ))
 }
 
@@ -259,12 +380,17 @@ pub async fn post_submit(
         success_message: String,
         webhook_url: Option<String>,
         archived: bool,
+        max_attempts: i32,
+        retry_cooldown_seconds: i32,
+        retry_policy: String,
+        lock_on_pass: bool,
     }
 
     let row = sqlx::query_as::<_, SubmitRow>(
         "SELECT id, guild_id, title, version, schema, is_quiz, single_submission, allow_edits, \
                 passing_score, open_at, close_at, require_verified, min_account_age_days, \
-                success_message, webhook_url, archived \
+                success_message, webhook_url, archived, \
+                max_attempts, retry_cooldown_seconds, retry_policy, lock_on_pass \
          FROM forms WHERE slug = $1 FOR SHARE",
     )
     .bind(&slug)
@@ -293,6 +419,12 @@ pub async fn post_submit(
     let success_message = row.success_message;
     let webhook_url = row.webhook_url;
     let archived = row.archived;
+    let retry_config = RetryConfig {
+        max_attempts: row.max_attempts,
+        cooldown_seconds: row.retry_cooldown_seconds as i64,
+        policy: RetryPolicy::from_str_or_default(&row.retry_policy),
+        lock_on_pass: row.lock_on_pass,
+    };
 
     if archived {
         return Err(AppError::FormNotFound(slug));
@@ -339,77 +471,44 @@ pub async fn post_submit(
         None
     };
 
+    // `passed` stored on the response is only meaningful for graded quizzes
+    // that declare a threshold — it gates `lock_on_pass` and drives the
+    // member-facing copy, NOT role eligibility (that stays live on the
+    // role-link conditions). No threshold -> NULL ("not gradeable for lock").
+    let stored_passed: Option<bool> = match (is_quiz, total_score, passing_score) {
+        (true, Some(s), Some(t)) => Some(s >= t),
+        _ => None,
+    };
+
     let answers_json = Value::Object(verified);
     let form_id_text = form_id.to_string();
+
+    // Serialise concurrent submits from the same member on canonical-response
+    // forms so the read-decide-write below (cooldown + attempt-limit check,
+    // then update/insert) is atomic — a double-click or two tabs can't slip
+    // two attempts past the gate or race two "first" inserts. Transaction-
+    // scoped: released on COMMIT/ROLLBACK. Unlimited forms keep many rows and
+    // need no serialisation.
+    if single_submission {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("{form_id_text}:{discord_id}"))
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    // Carries what the response should tell the client about remaining
+    // retries. `None` for forms where retries don't apply.
+    let mut attempts_left_out: Option<i32> = None;
+    let mut next_attempt_at_out: Option<chrono::DateTime<chrono::Utc>> = None;
 
     // `version` is locked in via the surrounding `FOR SHARE` so persisting
     // it here freezes condition evaluation to the schema the user actually
     // answered against. See migration 007 for the column.
-    let response_id: Option<uuid::Uuid> = if single_submission {
-        if allow_edits {
-            // Try INSERT; on conflict, UPDATE in place.
-            let existing: Option<uuid::Uuid> = sqlx::query_scalar(
-                "SELECT id FROM form_responses WHERE form_id = $1 AND discord_id = $2 LIMIT 1",
-            )
-            .bind(&form_id_text)
-            .bind(&discord_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-            if let Some(id) = existing {
-                sqlx::query(
-                    "UPDATE form_responses SET answers = $1, total_score = $2, \
-                                                schema_version = $3, last_edited_at = now() \
-                     WHERE id = $4",
-                )
-                .bind(&answers_json)
-                .bind(total_score)
-                .bind(version)
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-                Some(id)
-            } else {
-                let id = sqlx::query_scalar::<_, uuid::Uuid>(
-                    "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version) \
-                     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-                )
-                .bind(&form_id_text)
-                .bind(&guild_id)
-                .bind(&discord_id)
-                .bind(&answers_json)
-                .bind(total_score)
-                .bind(version)
-                .fetch_one(&mut *tx)
-                .await?;
-                Some(id)
-            }
-        } else {
-            // Insert only if no row exists yet.
-            let inserted = sqlx::query_scalar::<_, uuid::Uuid>(
-                "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version) \
-                 SELECT $1, $2, $3, $4, $5, $6 \
-                 WHERE NOT EXISTS ( \
-                    SELECT 1 FROM form_responses WHERE form_id = $1 AND discord_id = $3 \
-                 ) \
-                 RETURNING id",
-            )
-            .bind(&form_id_text)
-            .bind(&guild_id)
-            .bind(&discord_id)
-            .bind(&answers_json)
-            .bind(total_score)
-            .bind(version)
-            .fetch_optional(&mut *tx)
-            .await?;
-            if inserted.is_none() {
-                return Err(AppError::DuplicateSubmission);
-            }
-            inserted
-        }
-    } else {
+    let response_id: Option<uuid::Uuid> = if !single_submission {
+        // Unlimited form: every submit is a fresh row (existing behaviour).
         let id = sqlx::query_scalar::<_, uuid::Uuid>(
-            "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version) \
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed) \
+             VALUES ($1, $2, $3, $4, $5, $6, 1, $7) RETURNING id",
         )
         .bind(&form_id_text)
         .bind(&guild_id)
@@ -417,9 +516,156 @@ pub async fn post_submit(
         .bind(&answers_json)
         .bind(total_score)
         .bind(version)
+        .bind(stored_passed)
         .fetch_one(&mut *tx)
         .await?;
         Some(id)
+    } else if allow_edits {
+        // Non-quiz, freely-editable: upsert the single canonical row in place.
+        // Editing is not an "attempt" — no cooldown, no attempt-count bump.
+        let existing: Option<uuid::Uuid> = sqlx::query_scalar(
+            "SELECT id FROM form_responses WHERE form_id = $1 AND discord_id = $2 \
+             ORDER BY last_edited_at DESC LIMIT 1 FOR UPDATE",
+        )
+        .bind(&form_id_text)
+        .bind(&discord_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(id) = existing {
+            sqlx::query(
+                "UPDATE form_responses SET answers = $1, total_score = $2, passed = $3, \
+                                            schema_version = $4, last_edited_at = now() \
+                 WHERE id = $5",
+            )
+            .bind(&answers_json)
+            .bind(total_score)
+            .bind(stored_passed)
+            .bind(version)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+            Some(id)
+        } else {
+            let id = sqlx::query_scalar::<_, uuid::Uuid>(
+                "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 1, $7) RETURNING id",
+            )
+            .bind(&form_id_text)
+            .bind(&guild_id)
+            .bind(&discord_id)
+            .bind(&answers_json)
+            .bind(total_score)
+            .bind(version)
+            .bind(stored_passed)
+            .fetch_one(&mut *tx)
+            .await?;
+            Some(id)
+        }
+    } else {
+        // Retry-governed path: load the canonical attempt (if any) under the
+        // advisory lock, decide whether this attempt is allowed, then apply
+        // the retention policy.
+        let existing_row = sqlx::query_as::<_, CanonicalAttemptRow>(
+            "SELECT id, attempt_count, total_score, passed, last_edited_at \
+             FROM form_responses WHERE form_id = $1 AND discord_id = $2 \
+             ORDER BY last_edited_at DESC LIMIT 1 FOR UPDATE",
+        )
+        .bind(&form_id_text)
+        .bind(&discord_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let existing = existing_row.as_ref().map(|r| ExistingAttempt {
+            attempt_count: r.attempt_count,
+            last_attempt_at: r.last_edited_at,
+            total_score: r.total_score,
+            passed: r.passed,
+        });
+        let new_sub = NewSubmission {
+            total_score,
+            passed: stored_passed,
+        };
+
+        let accepted = match retry::decide(now, &retry_config, existing.as_ref(), &new_sub) {
+            Ok(a) => a,
+            Err(retry::DenyReason::AlreadyPassed) => return Err(AppError::AlreadyPassed),
+            Err(retry::DenyReason::AttemptsExhausted { max }) => {
+                // Preserve the historical contract for plain one-shot forms.
+                return Err(if max <= 1 {
+                    AppError::DuplicateSubmission
+                } else {
+                    AppError::AttemptsExhausted { max }
+                });
+            }
+            Err(retry::DenyReason::Cooldown {
+                retry_after_seconds,
+                ..
+            }) => {
+                return Err(AppError::RetryCooldown {
+                    retry_after_seconds,
+                })
+            }
+        };
+
+        // Surface remaining attempts / next-retry time to the client.
+        if retry_config.max_attempts > 0 {
+            attempts_left_out = Some((retry_config.max_attempts - accepted.attempt_count).max(0));
+        }
+        if retry_config.cooldown_seconds > 0 {
+            next_attempt_at_out =
+                Some(now + chrono::Duration::seconds(retry_config.cooldown_seconds));
+        }
+
+        if let Some(r) = existing_row {
+            if accepted.overwrite_answers {
+                sqlx::query(
+                    "UPDATE form_responses SET answers = $1, total_score = $2, passed = $3, \
+                                                attempt_count = $4, schema_version = $5, \
+                                                last_edited_at = now() \
+                     WHERE id = $6",
+                )
+                .bind(&answers_json)
+                .bind(accepted.total_score)
+                .bind(accepted.passed)
+                .bind(accepted.attempt_count)
+                .bind(version)
+                .bind(r.id)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                // keep_best attempt that didn't improve: keep the stored
+                // answers + schema_version, but still record the attempt
+                // (count + cooldown clock) and sticky pass/score.
+                sqlx::query(
+                    "UPDATE form_responses SET total_score = $1, passed = $2, \
+                                                attempt_count = $3, last_edited_at = now() \
+                     WHERE id = $4",
+                )
+                .bind(accepted.total_score)
+                .bind(accepted.passed)
+                .bind(accepted.attempt_count)
+                .bind(r.id)
+                .execute(&mut *tx)
+                .await?;
+            }
+            Some(r.id)
+        } else {
+            let id = sqlx::query_scalar::<_, uuid::Uuid>(
+                "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+            )
+            .bind(&form_id_text)
+            .bind(&guild_id)
+            .bind(&discord_id)
+            .bind(&answers_json)
+            .bind(accepted.total_score)
+            .bind(version)
+            .bind(accepted.attempt_count)
+            .bind(accepted.passed)
+            .fetch_one(&mut *tx)
+            .await?;
+            Some(id)
+        }
     };
 
     // Enqueue background work INSIDE the transaction so the player_sync /
@@ -449,6 +695,11 @@ pub async fn post_submit(
 
     tx.commit().await?;
 
+    // Retry summary echoed to the client so the done page can say "2 attempts
+    // left" or "try again in 3h". Only populated for retry-governed forms.
+    let next_attempt_at_str = next_attempt_at_out.map(|t| t.to_rfc3339());
+    let retries_enabled = single_submission && !allow_edits && retry_config.retries_enabled();
+
     if is_quiz {
         // Pass/fail only — never echo `total_score`. The raw score is a
         // brute-force oracle (and a memorisation aid for shared-link cheating).
@@ -464,12 +715,18 @@ pub async fn post_submit(
             "success": true,
             "message": success_message,
             "passed": passed,
+            "retries_enabled": retries_enabled,
+            "attempts_left": attempts_left_out,
+            "next_attempt_at": next_attempt_at_str,
         })))
     } else {
         Ok(Json(json!({
             "success": true,
             "message": success_message,
             "response_id": response_id.map(|i| i.to_string()),
+            "retries_enabled": retries_enabled,
+            "attempts_left": attempts_left_out,
+            "next_attempt_at": next_attempt_at_str,
         })))
     }
 }
@@ -644,6 +901,7 @@ fn shuffle_schema(schema: &mut Value, shuffle_options: bool) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_form_page(
     base_url: &str,
     form: &FormRow,
@@ -651,6 +909,7 @@ fn render_form_page(
     discord_id: &str,
     display_name: &str,
     preview: bool,
+    retry_status: Value,
 ) -> Response {
     // Two transforms before we serialise the schema to the browser:
     //
@@ -693,6 +952,7 @@ fn render_form_page(
         "display_name": display_name,
         "base_url": base_url,
         "guild_id": form.guild_id,
+        "retry": retry_status,
     })
     .to_string();
 

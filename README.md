@@ -81,6 +81,21 @@ separate service. Point `AUTH_GATEWAY_URL` at it and share `INTERNAL_API_KEY`.
   enqueues `player_sync` + (optional) `webhook` jobs in the same transaction,
   commits. Worker re-evaluates role conditions and calls RoleLogic to
   add/remove the user.
+- **Retries & cooldown** — forms that keep a single canonical response
+  (`single_submission`, which quizzes always are) can allow bounded retries:
+  `max_attempts` (1 = one-shot, the default; 0 = unlimited),
+  `retry_cooldown_seconds` between attempts, and `retry_policy`
+  (`keep_best` — highest score wins, passing is sticky — or `keep_latest`),
+  plus `lock_on_pass`. Each member keeps exactly one canonical row, so the
+  per-player and per-role-link sync paths evaluate the *same* attempt; the
+  submit handler takes a per-`(form, member)` `pg_advisory_xact_lock` so the
+  cooldown/limit check and write are atomic against concurrent submits. The
+  anti-cheat posture is unchanged — only a pass/fail bit (never the score or
+  per-question correctness) is returned, and question/option order is
+  shuffled per load, so retries leak at most one bit per attempt, rate-limited
+  by the cooldown and capped by `max_attempts`. See
+  [`migrations/009_form_retries.sql`](migrations/009_form_retries.sql) and
+  [`src/services/retry.rs`](src/services/retry.rs).
 - **Admin builder** — `GET /admin/{guild_id}` is the form list, `GET /admin/{guild_id}/forms/{form_id}`
   is the builder UI. CSRF: cookie-authenticated state-changing routes
   enforce an `Origin` allowlist atop the CORS allowlist. Optimistic locking

@@ -1,4 +1,4 @@
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use serde_json::json;
@@ -52,6 +52,15 @@ pub enum AppError {
 
     #[error("Duplicate submission")]
     DuplicateSubmission,
+
+    #[error("No attempts remaining")]
+    AttemptsExhausted { max: i32 },
+
+    #[error("Retry cooldown active")]
+    RetryCooldown { retry_after_seconds: i64 },
+
+    #[error("Already passed; no further attempts")]
+    AlreadyPassed,
 
     #[error("Form was edited; reload and try again")]
     StaleVersion,
@@ -132,6 +141,35 @@ impl IntoResponse for AppError {
                 axum::Json(json!({
                     "error": "You've already submitted this form.",
                     "code": "DUPLICATE_SUBMISSION",
+                })),
+            )
+                .into_response(),
+            AppError::AttemptsExhausted { max } => (
+                StatusCode::CONFLICT,
+                axum::Json(json!({
+                    "error": format!("You've used all {max} of your attempts for this form."),
+                    "code": "ATTEMPTS_EXHAUSTED",
+                    "max_attempts": max,
+                })),
+            )
+                .into_response(),
+            AppError::RetryCooldown {
+                retry_after_seconds,
+            } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(header::RETRY_AFTER, retry_after_seconds.to_string())],
+                axum::Json(json!({
+                    "error": "Please wait before trying again.",
+                    "code": "RETRY_COOLDOWN",
+                    "retry_after_seconds": retry_after_seconds,
+                })),
+            )
+                .into_response(),
+            AppError::AlreadyPassed => (
+                StatusCode::CONFLICT,
+                axum::Json(json!({
+                    "error": "You've already passed — no further attempts are needed.",
+                    "code": "ALREADY_PASSED",
                 })),
             )
                 .into_response(),

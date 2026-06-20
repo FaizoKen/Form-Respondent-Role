@@ -117,6 +117,26 @@ p#msg {
   line-height: 1.5;
 }
 .hint strong { color: var(--text-soft); font-weight: 600; }
+.retry {
+  margin-top: 18px;
+  color: var(--text-soft);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.retry strong { color: var(--text); font-weight: 700; }
+.retry-btn {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 10px 22px;
+  background: var(--brand);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.retry-btn:hover { filter: brightness(1.08); }
+.retry-btn.disabled { opacity: 0.55; pointer-events: none; }
 
 @keyframes enter {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
@@ -147,6 +167,7 @@ p#msg {
   <h1 id="title">Thanks — you're all set!</h1>
   <p id="msg">Your response has been recorded.</p>
   <div id="result" style="display:none;" class="result"></div>
+  <div id="retry" class="retry" style="display:none;"></div>
   <div class="hint">Server roles update automatically — please allow <strong>up to a minute</strong> for changes to appear.</div>
 </main>
 <script>
@@ -160,6 +181,61 @@ if (result === 'pass' || result === 'fail') {
 }
 const customMsg = params.get('msg');
 if (customMsg) document.getElementById('msg').textContent = customMsg;
+
+// Retry hint: shown when the submit handler decided another attempt is still
+// possible (it omits these params after a locked-in pass). `left` is the
+// remaining attempt count (omitted when unlimited); `next` is an RFC3339
+// timestamp the next attempt unlocks at.
+function fmtDuration(ms) {
+  let s = Math.max(0, Math.ceil(ms / 1000));
+  const d = Math.floor(s / 86400); s -= d * 86400;
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  if (d > 0) return d + 'd ' + h + 'h';
+  if (h > 0) return h + 'h ' + m + 'm';
+  if (m > 0) return m + 'm ' + s + 's';
+  return s + 's';
+}
+(function () {
+  const left = params.get('left');
+  const next = params.get('next');
+  const slug = params.get('slug');
+  if (left === null && !next) return;
+  const box = document.getElementById('retry');
+  const leftN = left === null ? null : parseInt(left, 10);
+  if (leftN === 0) {
+    box.innerHTML = "<strong>That was your last attempt.</strong>";
+    box.style.display = 'block';
+    return;
+  }
+  let html = '';
+  if (leftN === null) html = 'You can try again any time.';
+  else html = 'You have <strong>' + leftN + '</strong> attempt' + (leftN === 1 ? '' : 's') + ' left.';
+  const formUrl = slug ? ('__BASE_URL__/f/' + encodeURIComponent(slug)) : null;
+  html += '<div id="retry-when"></div>';
+  if (formUrl) html += '<a id="retry-btn" class="retry-btn" href="' + formUrl + '">Try again</a>';
+  box.innerHTML = html;
+  box.style.display = 'block';
+
+  const whenEl = document.getElementById('retry-when');
+  const btn = document.getElementById('retry-btn');
+  const until = next ? new Date(next).getTime() : 0;
+  if (until && until > Date.now()) {
+    const tick = () => {
+      const remain = until - Date.now();
+      if (remain <= 0) {
+        clearInterval(timer);
+        if (whenEl) whenEl.textContent = '';
+        if (btn) btn.classList.remove('disabled');
+        return;
+      }
+      if (whenEl) whenEl.textContent = 'Next attempt available in ' + fmtDuration(remain) + '.';
+      if (btn) btn.classList.add('disabled');
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+  }
+})();
 </script>
 </body>
 </html>

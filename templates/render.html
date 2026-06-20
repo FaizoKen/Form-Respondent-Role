@@ -116,6 +116,9 @@ header.hero {
 }
 .banner-preview { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
 .banner-info { background: var(--info-bg); color: var(--info-text); border: 1px solid var(--info-border); }
+.banner-warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+.banner-success { background: var(--success-bg); color: var(--success-text); border: 1px solid var(--success-border); }
+.banner-danger { background: var(--danger-bg); color: var(--danger-text); border: 1px solid var(--danger-border); }
 .banner-icon { flex: 0 0 18px; height: 18px; margin-top: 1px; }
 
 .guild-ctx {
@@ -562,6 +565,15 @@ header.hero {
     <div><strong>Preview mode.</strong> Submissions are disabled while editing.</div>
   </div>
 
+  <!-- Retry / cooldown status. Populated by setupRetry() from boot.retry for
+       forms that keep a single canonical attempt: shows the attempt counter,
+       a live cooldown countdown, or a "no attempts left / already passed"
+       block. Hidden on forms where retries don't apply. -->
+  <div id="retry-banner" class="banner banner-info" style="display:none;" role="status" aria-live="polite">
+    <svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+    <div id="retry-banner-text"></div>
+  </div>
+
   <div class="progress-wrap" id="progress-wrap" style="display:none;">
     <div class="progress-meta">
       <span><strong id="progress-filled">0</strong>&nbsp;<span id="progress-of">of</span>&nbsp;<strong id="progress-total">0</strong> <span id="progress-label">answered</span></span>
@@ -692,6 +704,95 @@ async function applyGuildContext() {
 }
 const settings = (boot.schema && boot.schema.settings) || {};
 if (settings.submit_label) submitBtnLabel.textContent = settings.submit_label;
+
+// ---- Retry / cooldown UX --------------------------------------------------
+let cooldownTimer = null;
+
+function fmtDuration(ms) {
+  let s = Math.max(0, Math.ceil(ms / 1000));
+  const d = Math.floor(s / 86400); s -= d * 86400;
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  if (d > 0) return d + 'd ' + h + 'h';
+  if (h > 0) return h + 'h ' + m + 'm';
+  if (m > 0) return m + 'm ' + s + 's';
+  return s + 's';
+}
+
+function showRetryBanner(kind, html) {
+  const banner = document.getElementById('retry-banner');
+  banner.className = 'banner banner-' + kind;
+  document.getElementById('retry-banner-text').innerHTML = html;
+  banner.style.display = 'flex';
+}
+
+function blockSubmit(label) {
+  submitBtn.disabled = true;
+  submitBtn.classList.remove('loading');
+  if (label) submitBtnLabel.textContent = label;
+}
+
+// Disable the submit button and count down to `untilMs`, then re-enable.
+function startCooldown(untilMs, cdElId) {
+  if (cooldownTimer) { clearInterval(cooldownTimer); cooldownTimer = null; }
+  submitBtn.disabled = true;
+  submitBtn.classList.remove('loading');
+  const tick = () => {
+    const remain = untilMs - Date.now();
+    const cd = cdElId ? document.getElementById(cdElId) : null;
+    if (remain <= 0) {
+      clearInterval(cooldownTimer); cooldownTimer = null;
+      if (cd) cd.textContent = '';
+      submitBtn.disabled = false;
+      submitBtnLabel.textContent = settings.submit_label || 'Submit';
+      const banner = document.getElementById('retry-banner');
+      if (banner.style.display !== 'none' && cdElId) {
+        showRetryBanner('info', 'You can try again now.');
+      }
+      return;
+    }
+    const txt = 'try again in ' + fmtDuration(remain);
+    if (cd) cd.textContent = '— ' + txt;
+    submitBtnLabel.textContent = 'Retry ' + fmtDuration(remain);
+  };
+  tick();
+  cooldownTimer = setInterval(tick, 1000);
+}
+
+// Render the initial retry state from the server-provided bootstrap.
+function setupRetry() {
+  const r = boot.retry;
+  if (!r || boot.preview) return;
+  if (r.blocked && r.blocked_reason === 'passed') {
+    showRetryBanner('success', "<strong>You've already passed.</strong> No further attempts are needed.");
+    blockSubmit('Already passed');
+    return;
+  }
+  if (r.blocked && r.blocked_reason === 'exhausted') {
+    if (r.max_attempts === 1) {
+      showRetryBanner('danger', "<strong>You've already submitted this form.</strong>");
+    } else {
+      showRetryBanner('danger', "<strong>No attempts remaining.</strong> You've used all " + r.max_attempts + " of your attempts.");
+    }
+    blockSubmit('No attempts left');
+    return;
+  }
+  // Not blocked. Only worth a banner when retries are actually in play.
+  if (!r.enabled) return;
+  const used = r.attempts_used || 0;
+  let html;
+  if (r.max_attempts === 0) {
+    html = '<strong>Attempt ' + (used + 1) + '</strong> — unlimited attempts allowed.';
+  } else {
+    html = '<strong>Attempt ' + (used + 1) + ' of ' + r.max_attempts + '.</strong>';
+  }
+  html += ' <span id="retry-cd"></span>';
+  showRetryBanner('info', html);
+  if (r.next_attempt_at) {
+    const until = new Date(r.next_attempt_at).getTime();
+    if (Number.isFinite(until) && until > Date.now()) startCooldown(until, 'retry-cd');
+  }
+}
 
 // Restore draft if any
 let answers = {};
@@ -1037,8 +1138,30 @@ submitBtn.addEventListener('click', async () => {
       return;
     }
     if (!res.ok) {
-      submitBtn.disabled = false;
       submitBtn.classList.remove('loading');
+      // Retry-system responses get tailored handling: a cooldown starts a
+      // countdown in place; exhausted / already-passed block the button and
+      // explain why instead of just toasting a generic error.
+      if (data.code === 'RETRY_COOLDOWN') {
+        const secs = data.retry_after_seconds || 60;
+        showRetryBanner('warn', 'You just submitted — <span id="retry-cd"></span>');
+        startCooldown(Date.now() + secs * 1000, 'retry-cd');
+        showToast(data.error || 'Please wait before trying again.');
+        return;
+      }
+      if (data.code === 'ATTEMPTS_EXHAUSTED' || data.code === 'DUPLICATE_SUBMISSION') {
+        showRetryBanner('danger', '<strong>' + (data.error || "You've used all your attempts.") + '</strong>');
+        blockSubmit('No attempts left');
+        showToast(data.error || 'No attempts remaining.');
+        return;
+      }
+      if (data.code === 'ALREADY_PASSED') {
+        showRetryBanner('success', '<strong>' + (data.error || "You've already passed.") + '</strong>');
+        blockSubmit('Already passed');
+        showToast(data.error || 'You already passed.');
+        return;
+      }
+      submitBtn.disabled = false;
       submitBtnLabel.textContent = settings.submit_label || 'Submit';
       showToast(data.error || ('Submission failed (' + res.status + ')'));
       return;
@@ -1050,6 +1173,15 @@ submitBtn.addEventListener('click', async () => {
     // users edit-loop towards the answer key). Non-quiz submits omit both.
     if (data.passed === true) params.set('result', 'pass');
     else if (data.passed === false) params.set('result', 'fail');
+    // Surface remaining retries on the done page, but only when another
+    // attempt is actually possible (not after a locked-in pass).
+    if (data.retries_enabled && data.passed !== true) {
+      if (data.attempts_left !== null && data.attempts_left !== undefined) {
+        params.set('left', String(data.attempts_left));
+      }
+      if (data.next_attempt_at) params.set('next', data.next_attempt_at);
+      params.set('slug', boot.slug);
+    }
     location.href = boot.base_url + '/f/' + boot.slug + '/done' + (params.toString() ? '?' + params.toString() : '');
   } catch (e) {
     submitBtn.disabled = false;
@@ -1060,6 +1192,7 @@ submitBtn.addEventListener('click', async () => {
 });
 
 renderPage();
+setupRetry();
 </script>
 </body>
 </html>
