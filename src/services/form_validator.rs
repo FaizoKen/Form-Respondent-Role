@@ -302,8 +302,7 @@ fn as_number(v: &Value) -> Option<f64> {
 /// carries a non-empty answer key. Both are required for it to count.
 pub fn is_graded(q: &Question) -> bool {
     q.points.map(|p| p > 0).unwrap_or(false)
-        && q
-            .correct
+        && q.correct
             .as_ref()
             .map(|c| !accepted_answers(c).is_empty())
             .unwrap_or(false)
@@ -374,7 +373,10 @@ pub fn compute_quiz_score(schema: &FormSchema, verified: &VerifiedAnswers) -> i3
             // canonical value (option id / ISO date string).
             _ => {
                 let got = actual.as_str().unwrap_or_default().trim();
-                !got.is_empty() && accepted_answers(correct).iter().any(|want| want.trim() == got)
+                !got.is_empty()
+                    && accepted_answers(correct)
+                        .iter()
+                        .any(|want| want.trim() == got)
             }
         };
         if matched {
@@ -947,7 +949,10 @@ mod tests {
         assert_eq!(
             compute_quiz_score(
                 &s,
-                &answers(&[("a", serde_json::json!("yes")), ("b", serde_json::json!("yes"))])
+                &answers(&[
+                    ("a", serde_json::json!("yes")),
+                    ("b", serde_json::json!("yes"))
+                ])
             ),
             0
         );
