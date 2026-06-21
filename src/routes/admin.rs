@@ -1126,6 +1126,137 @@ pub async fn responses_data(
 }
 
 // ---------------------------------------------------------------------------
+// DELETE /admin/{guild_id}/forms/{form_id}/responses/{response_id}
+// ---------------------------------------------------------------------------
+
+/// Delete a single response. Primary use is clearing test submissions, but it
+/// doubles as a manual "remove this member's form-gated role": deleting their
+/// response makes them stop qualifying, so the follow-up `player_sync`
+/// reconciles the role off. Scoped to the form, which is verified to belong to
+/// the caller's guild first so we never touch (or reveal) another tenant's data.
+pub async fn delete_response(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    headers: HeaderMap,
+    Path((guild_id, form_id, response_id)): Path<(String, String, String)>,
+) -> Result<Json<Value>, AppError> {
+    csrf::verify_origin(&headers, &state.allowed_origins)?;
+    require_manager(&state, &jar, &guild_id).await?;
+
+    let form_uuid = uuid::Uuid::parse_str(&form_id)
+        .map_err(|_| AppError::BadRequest("Invalid form id.".into()))?;
+    let resp_uuid = uuid::Uuid::parse_str(&response_id)
+        .map_err(|_| AppError::BadRequest("Invalid response id.".into()))?;
+
+    // `SELECT 1` returns INT4 in Postgres — decode as i32 (see delete_form).
+    let owns: Option<i32> =
+        sqlx::query_scalar("SELECT 1 FROM forms WHERE id = $1 AND guild_id = $2")
+            .bind(form_uuid)
+            .bind(&guild_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if owns.is_none() {
+        return Err(AppError::NotFound("Form not found.".into()));
+    }
+
+    // Delete scoped to (response, form). RETURNING discord_id so we can
+    // reconcile that member's role-gating afterwards.
+    let deleted: Option<(String,)> = sqlx::query_as(
+        "DELETE FROM form_responses WHERE id = $1 AND form_id = $2 RETURNING discord_id",
+    )
+    .bind(resp_uuid)
+    .bind(&form_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let Some((discord_id,)) = deleted else {
+        return Err(AppError::NotFound("Response not found.".into()));
+    };
+
+    // Re-evaluate this member's form-gated roles now that their response is
+    // gone — `qualifies` turns false, so any role granted by this form is
+    // removed. Best-effort enqueue: the periodic sync would also catch it, but
+    // the per-player job makes the removal near-immediate.
+    if let Err(e) = jobs::enqueue_player_sync(
+        &state.pool,
+        jobs::PlayerSyncPayload::Updated {
+            discord_id: discord_id.clone(),
+        },
+    )
+    .await
+    {
+        tracing::warn!(
+            guild_id,
+            form_id,
+            discord_id,
+            "enqueue player_sync after response delete failed: {e}"
+        );
+    }
+
+    tracing::info!(
+        guild_id,
+        form_id,
+        response_id,
+        discord_id,
+        "Response deleted"
+    );
+    Ok(Json(json!({ "success": true, "discord_id": discord_id })))
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /admin/{guild_id}/forms/{form_id}/responses — clear all responses
+// ---------------------------------------------------------------------------
+
+/// Delete *every* response for a form (a testing/reset convenience). Bound
+/// role-links are re-synced so members who only qualified through this form
+/// lose the gated role — mirrors the reconcile path in `delete_form`.
+pub async fn delete_all_responses(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    headers: HeaderMap,
+    Path((guild_id, form_id)): Path<(String, String)>,
+) -> Result<Json<Value>, AppError> {
+    csrf::verify_origin(&headers, &state.allowed_origins)?;
+    require_manager(&state, &jar, &guild_id).await?;
+
+    let form_uuid = uuid::Uuid::parse_str(&form_id)
+        .map_err(|_| AppError::BadRequest("Invalid form id.".into()))?;
+
+    let owns: Option<i32> =
+        sqlx::query_scalar("SELECT 1 FROM forms WHERE id = $1 AND guild_id = $2")
+            .bind(form_uuid)
+            .bind(&guild_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if owns.is_none() {
+        return Err(AppError::NotFound("Form not found.".into()));
+    }
+
+    // Role-links bound to this form need a re-sync once the responses are gone.
+    let bound = sqlx::query_as::<_, (String, String)>(
+        "SELECT guild_id, role_id FROM role_links WHERE form_id = $1",
+    )
+    .bind(&form_id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let res = sqlx::query("DELETE FROM form_responses WHERE form_id = $1")
+        .bind(&form_id)
+        .execute(&state.pool)
+        .await?;
+    let deleted = res.rows_affected();
+
+    for (gid, rid) in &bound {
+        if let Err(e) = jobs::enqueue_config_sync(&state.pool, gid, rid).await {
+            tracing::warn!(guild_id = %gid, role_id = %rid, "enqueue config_sync after clear-all failed: {e}");
+        }
+    }
+
+    tracing::info!(guild_id, form_id, deleted, "All responses cleared");
+    Ok(Json(json!({ "success": true, "deleted": deleted })))
+}
+
+// ---------------------------------------------------------------------------
 // GET /admin/{guild_id}/forms/{form_id}/responses.csv — CSV export
 // ---------------------------------------------------------------------------
 

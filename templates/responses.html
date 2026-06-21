@@ -100,6 +100,28 @@ header.page-head {
   border-color: var(--border-strong);
 }
 .btn-sec:hover:not(:disabled) { background: var(--surface-2); color: var(--text); border-color: #3b4a6c; }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn-danger { background: #3a1620; color: #ff6b81; border-color: rgba(255,107,129,0.35); }
+.btn-danger:hover:not(:disabled) { background: #4a1a28; color: #ff8095; border-color: rgba(255,107,129,0.55); }
+.btn-sm { padding: 6px 12px; min-height: 32px; font-size: 12.5px; }
+
+/* Row delete action */
+.row-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 30px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+}
+.row-del:hover:not(:disabled) { background: #3a1620; color: #ff6b81; border-color: rgba(255,107,129,0.5); }
+.row-del:disabled { opacity: 0.5; cursor: default; }
+td.actions { white-space: nowrap; }
 
 /* Stat strip */
 .stats {
@@ -149,6 +171,15 @@ header.page-head {
   margin-bottom: 14px;
   letter-spacing: -0.005em;
 }
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.card-head h3 { margin-bottom: 0; }
 
 .charts {
   display: grid;
@@ -375,15 +406,69 @@ async function copyToClipboard(text) {
 }
 
 document.addEventListener('click', async (e) => {
-  const target = e.target.closest('[data-empty-action]');
-  if (!target) return;
-  const action = target.dataset.emptyAction;
-  if (action === 'copy-link' && window._formShareUrl) {
-    const ok = await copyToClipboard(window._formShareUrl);
-    target.textContent = ok ? 'Link copied!' : 'Copy failed';
-    setTimeout(() => { target.textContent = 'Copy form link'; }, 2500);
+  const emptyBtn = e.target.closest('[data-empty-action]');
+  if (emptyBtn) {
+    const action = emptyBtn.dataset.emptyAction;
+    if (action === 'copy-link' && window._formShareUrl) {
+      const ok = await copyToClipboard(window._formShareUrl);
+      emptyBtn.textContent = ok ? 'Link copied!' : 'Copy failed';
+      setTimeout(() => { emptyBtn.textContent = 'Copy form link'; }, 2500);
+    }
+    return;
   }
+
+  const delBtn = e.target.closest('[data-del-id]');
+  if (delBtn) { await deleteResponse(delBtn); return; }
+
+  const clearBtn = e.target.closest('#clear-all-btn');
+  if (clearBtn) { await clearAllResponses(clearBtn); return; }
 });
+
+// Redirect to login on an expired session, mirroring load().
+function gotoLogin() {
+  location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname);
+}
+
+async function deleteResponse(btn) {
+  const id = btn.dataset.delId;
+  const user = btn.dataset.delUser || 'this member';
+  if (!confirm('Delete this response from ' + user + '?\n\nIf a role is gated on this form, it will be removed from them shortly.')) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch(BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (res.status === 401) { gotoLogin(); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.error || 'Failed to delete response.'); btn.disabled = false; return; }
+    load(); // refresh stats + table
+  } catch (err) {
+    alert('Network error: ' + err.message);
+    btn.disabled = false;
+  }
+}
+
+async function clearAllResponses(btn) {
+  if (!confirm('Delete ALL responses for this form?\n\nThis cannot be undone. Members who only qualified through this form will lose the gated role shortly.')) return;
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = 'Clearing…';
+  try {
+    const res = await fetch(BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses', {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (res.status === 401) { gotoLogin(); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.error || 'Failed to clear responses.'); btn.disabled = false; btn.textContent = prev; return; }
+    load();
+  } catch (err) {
+    alert('Network error: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+}
 
 async function load() {
   try {
@@ -463,10 +548,12 @@ function render(data) {
   }
 
   // Responses table
-  h += '<div class="card"><h3>All responses (' + data.responses.length + ')</h3><div class="table-wrap"><table><thead><tr><th>User</th><th>Submitted</th>';
+  h += '<div class="card"><div class="card-head"><h3>All responses (' + data.responses.length + ')</h3>'
+    + '<button type="button" class="btn btn-danger btn-sm" id="clear-all-btn">Clear all responses</button></div>';
+  h += '<div class="table-wrap"><table><thead><tr><th>User</th><th>Submitted</th>';
   if (data.is_quiz) h += '<th>Score</th>';
   for (const q of answerable) h += '<th>' + escapeHtml(q.title) + '</th>';
-  h += '</tr></thead><tbody>';
+  h += '<th>Actions</th></tr></thead><tbody>';
   for (const r of data.responses) {
     h += '<tr><td class="user">' + escapeHtml(r.discord_id) + '</td><td class="when">' + new Date(r.submitted_at).toLocaleString() + '</td>';
     if (data.is_quiz) h += '<td><span class="score-pill">' + (r.total_score ?? '–') + '</span></td>';
@@ -485,6 +572,10 @@ function render(data) {
       } else if (v != null) display = String(v);
       h += '<td>' + (display ? escapeHtml(display) : '<span style="color:var(--text-faint);">—</span>') + '</td>';
     }
+    h += '<td class="actions"><button type="button" class="row-del" title="Delete response"'
+      + ' data-del-id="' + escapeHtml(r.id) + '" data-del-user="' + escapeHtml(r.discord_id) + '">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
+      + '</button></td>';
     h += '</tr>';
   }
   h += '</tbody></table></div></div>';

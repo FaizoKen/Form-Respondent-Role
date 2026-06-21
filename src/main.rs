@@ -173,11 +173,15 @@ async fn main() {
         )
         .route(
             "/admin/{guild_id}/forms/{form_id}/responses",
-            get(routes::admin::responses_page),
+            get(routes::admin::responses_page).delete(routes::admin::delete_all_responses),
         )
         .route(
             "/admin/{guild_id}/forms/{form_id}/responses/data",
             get(routes::admin::responses_data),
+        )
+        .route(
+            "/admin/{guild_id}/forms/{form_id}/responses/{response_id}",
+            delete(routes::admin::delete_response),
         )
         .route(
             "/admin/{guild_id}/forms/{form_id}/responses/csv",
@@ -358,4 +362,34 @@ async fn main() {
     }
 
     tracing::info!("Server stopped");
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::routing::{delete, get};
+    use axum::Router;
+
+    /// Guards the response routes from a matchit overlap panic: the per-response
+    /// `DELETE /responses/{response_id}` shares a path prefix with the literal
+    /// `/responses/data` and `/responses/csv` siblings. axum 0.8 resolves static
+    /// segments ahead of params, but a future router rework could reintroduce a
+    /// conflict — constructing the Router here fails loudly if so.
+    #[test]
+    fn response_routes_do_not_conflict() {
+        async fn noop() {}
+        let _router: Router<()> = Router::new()
+            .route(
+                "/admin/{guild_id}/forms/{form_id}/responses",
+                get(noop).delete(noop),
+            )
+            .route(
+                "/admin/{guild_id}/forms/{form_id}/responses/data",
+                get(noop),
+            )
+            .route("/admin/{guild_id}/forms/{form_id}/responses/csv", get(noop))
+            .route(
+                "/admin/{guild_id}/forms/{form_id}/responses/{response_id}",
+                delete(noop),
+            );
+    }
 }
