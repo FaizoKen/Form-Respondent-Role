@@ -16,7 +16,12 @@ use crate::AppState;
 ///
 /// Bump the version suffix to force a fresh one-time pass after a future change
 /// that again needs every link re-evaluated.
-const MEMBERSHIP_RESYNC: &str = "membership_model_resync_v1";
+///
+/// v1 ran while the bulk sync still pre-capped by the API-reported `user_limit`
+/// (which fell back to 100, capping premium links). v2 re-runs after that pre-cap
+/// was removed in favour of letting the RoleLogic server enforce the real cap, so
+/// every link is rebuilt at full size.
+const MEMBERSHIP_RESYNC: &str = "membership_model_resync_v2";
 
 /// Run all pending one-time backfills. Best-effort: failures are logged, never
 /// fatal — the server still starts, and an un-run backfill is retried on the

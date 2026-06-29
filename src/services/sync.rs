@@ -174,6 +174,8 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
                                 delete_orphan_role_link(&guild_id, &role_id, &pool).await;
                                 return;
                             }
+                            // Disabled link: skip silently, leave config intact.
+                            Err(AppError::RoleLinkDisabled) => return,
                             Err(AppError::UserLimitReached { limit }) => {
                                 tracing::warn!(
                                     guild_id,
@@ -226,6 +228,8 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
                                 delete_orphan_role_link(&guild_id, &role_id, &pool).await;
                                 return;
                             }
+                            // Disabled link: skip silently, leave config intact.
+                            Err(AppError::RoleLinkDisabled) => return,
                             Err(e) => {
                                 tracing::error!(
                                     guild_id,
@@ -307,6 +311,8 @@ pub async fn sync_for_role_link(
                 delete_orphan_role_link(guild_id, role_id, pool).await;
                 return Ok(());
             }
+            // Disabled link: leave config + assignments intact, just skip.
+            Err(AppError::RoleLinkDisabled) => return Ok(()),
             Err(e) => return Err(e),
         }
         sqlx::query("DELETE FROM role_assignments WHERE guild_id = $1 AND role_id = $2")
@@ -319,17 +325,16 @@ pub async fn sync_for_role_link(
 
     // Candidate universe = everyone who submitted this form (a `form_responses`
     // row), minus anyone who opted this guild/plugin out. We deliberately do
-    // NOT intersect with the gateway's guild member list
-    // (`fetch_guild_member_ids`): that list is only the OAuth-derived cache of
-    // users who have signed into RoleLogic and whose 7-day-refreshed guild list
-    // still names this server. A respondent who completed the quiz but never
-    // opened the RoleLogic dashboard — or whose cache has since gone stale — is
-    // absent from it, which is exactly why this link under-granted (e.g. 359
-    // respondents collapsing to ~100). RoleLogic's bot is the real authority on
-    // who is actually in the guild when it applies the role, so pushing a
-    // non-member is harmless; opt-outs are still honored centrally below.
-    // Convention 40: an opt-out lookup error bubbles up and the job retries —
-    // we never treat a hiccup as "nobody opted out".
+    // NOT intersect with the gateway's guild member list: that list is only the
+    // OAuth-derived cache of users who have signed into RoleLogic and whose
+    // 7-day-refreshed guild list still names this server. A respondent who
+    // completed the quiz but never opened the RoleLogic dashboard — or whose
+    // cache has since gone stale — is absent from it, which is exactly why this
+    // link under-granted (e.g. 359 respondents collapsing to ~100). RoleLogic's
+    // bot is the real authority on who is actually in the guild when it applies
+    // the role, so pushing a non-member is harmless; opt-outs are still honored
+    // centrally below. Convention 40: an opt-out lookup error bubbles up and the
+    // job retries — we never treat a hiccup as "nobody opted out".
     let optout_ids = auth_gateway::fetch_guild_optout_ids(
         &state.http,
         &state.config.auth_gateway_url,
@@ -338,58 +343,70 @@ pub async fn sync_for_role_link(
     )
     .await?;
 
-    // The user_limit decides how many qualifying IDs we keep before the full
-    // PUT rebuild below. If we cannot read it, DO NOT fall back to a small
-    // default and rebuild — that would destructively truncate a premium link's
-    // user set (e.g. down to 100) on a transient API blip. Propagate instead
-    // so the job retries with the real limit intact.
-    let (_user_count, user_limit) =
-        match rl_client.get_user_info(guild_id, role_id, &api_token).await {
-            Ok(v) => v,
-            Err(AppError::RoleLinkNotFound) => {
-                delete_orphan_role_link(guild_id, role_id, pool).await;
-                return Ok(());
-            }
-            Err(e) => return Err(e),
-        };
+    // Push the FULL qualifying set. We do NOT pre-cap by a limit read from the
+    // RoleLogic API: that read depends on the central API echoing `user_limit`,
+    // which it does not on older builds — it silently fell back to 100 and
+    // capped premium links at 100. Instead the RoleLogic server, the real
+    // authority on the per-tier cap, enforces it on the PUT; if (and only if)
+    // it rejects the set as over-limit we re-query capped to the real limit it
+    // reports and push that. For premium links (cap in the millions) the first
+    // push always succeeds, so the cap no longer depends on any API deploy.
+    let qualifying_ids = query_qualifying(pool, &form_id, &optout_ids, &conditions, None).await?;
 
-    // Fixed binds: $1 = form_id, $2 = optout_ids, then condition binds, then
-    // limit. `<> ALL($2)` keeps everyone when the opt-out list is empty.
-    let (cond_where, cond_binds) = condition_eval::build_condition_where(&conditions, 2);
-    let limit_idx = 2 + cond_binds.len() + 1;
-
-    let query_str = format!(
-        "SELECT DISTINCT fr.discord_id \
-         FROM form_responses fr \
-         WHERE fr.form_id = $1 \
-           AND fr.discord_id <> '' \
-           AND fr.discord_id <> ALL($2::text[]) \
-           AND ({cond_where}) \
-         ORDER BY fr.discord_id \
-         LIMIT ${limit_idx}",
-    );
-
-    let qualifying_ids = exec_condition_query(
-        &query_str,
-        &form_id,
-        &optout_ids,
-        &cond_binds,
-        user_limit,
-        pool,
+    // Skip the PUT entirely when the desired set already equals what's assigned
+    // (both ordered + de-duped, so `==` is an exact set comparison). Keeps the
+    // startup backfill and repeated config_syncs from re-uploading unchanged
+    // links.
+    let current: Vec<String> = sqlx::query_scalar(
+        "SELECT discord_id FROM role_assignments \
+         WHERE guild_id = $1 AND role_id = $2 ORDER BY discord_id",
     )
+    .bind(guild_id)
+    .bind(role_id)
+    .fetch_all(pool)
     .await?;
+    if current == qualifying_ids {
+        return Ok(());
+    }
 
-    match rl_client
+    // The set we actually uploaded — equals `qualifying_ids` unless the server
+    // reports an over-limit rejection, in which case we cap to its real limit.
+    let final_ids = match rl_client
         .upload_users(guild_id, role_id, &qualifying_ids, &api_token)
         .await
     {
-        Ok(_) => {}
+        Ok(_) => qualifying_ids,
         Err(AppError::RoleLinkNotFound) => {
             delete_orphan_role_link(guild_id, role_id, pool).await;
             return Ok(());
         }
+        Err(AppError::RoleLinkDisabled) => return Ok(()),
+        Err(AppError::UserLimitReached { limit }) => {
+            tracing::warn!(
+                guild_id,
+                role_id,
+                limit,
+                qualifying = qualifying_ids.len(),
+                "Qualifying set exceeds role-link cap; capping to the server limit"
+            );
+            let capped =
+                query_qualifying(pool, &form_id, &optout_ids, &conditions, Some(limit)).await?;
+            match rl_client
+                .upload_users(guild_id, role_id, &capped, &api_token)
+                .await
+            {
+                Ok(_) => {}
+                Err(AppError::RoleLinkNotFound) => {
+                    delete_orphan_role_link(guild_id, role_id, pool).await;
+                    return Ok(());
+                }
+                Err(AppError::RoleLinkDisabled) => return Ok(()),
+                Err(e) => return Err(e),
+            }
+            capped
+        }
         Err(e) => return Err(e),
-    }
+    };
 
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM role_assignments WHERE guild_id = $1 AND role_id = $2")
@@ -398,14 +415,14 @@ pub async fn sync_for_role_link(
         .execute(&mut *tx)
         .await?;
 
-    if !qualifying_ids.is_empty() {
+    if !final_ids.is_empty() {
         sqlx::query(
             "INSERT INTO role_assignments (guild_id, role_id, discord_id) \
              SELECT $1, $2, UNNEST($3::text[])",
         )
         .bind(guild_id)
         .bind(role_id)
-        .bind(&qualifying_ids)
+        .bind(&final_ids)
         .execute(&mut *tx)
         .await?;
     }
@@ -414,19 +431,39 @@ pub async fn sync_for_role_link(
     Ok(())
 }
 
-async fn exec_condition_query(
-    query: &str,
-    form_id: &str,
-    // Bound at `$2` — the opt-out ID array the query filters out via `<> ALL`.
-    optout_ids: &[String],
-    cond_binds: &[ConditionBind],
-    limit: usize,
+/// Discord IDs that qualify for a form-bound role link: distinct respondents to
+/// `form_id` who pass `conditions`, minus `optout_ids`. `limit = None` returns
+/// the full set; `Some(n)` caps it (used only to retry after the server reports
+/// an over-cap rejection). Binds: `$1 = form_id`, `$2 = optout_ids`, condition
+/// binds from `$3`, optional `LIMIT` last. `<> ALL($2)` keeps everyone when the
+/// opt-out list is empty.
+async fn query_qualifying(
     pool: &sqlx::PgPool,
+    form_id: &str,
+    optout_ids: &[String],
+    conditions: &[Condition],
+    limit: Option<usize>,
 ) -> Result<Vec<String>, AppError> {
-    let mut q = sqlx::query_scalar::<_, String>(query);
+    let (cond_where, cond_binds) = condition_eval::build_condition_where(conditions, 2);
+
+    let mut sql = format!(
+        "SELECT DISTINCT fr.discord_id \
+         FROM form_responses fr \
+         WHERE fr.form_id = $1 \
+           AND fr.discord_id <> '' \
+           AND fr.discord_id <> ALL($2::text[]) \
+           AND ({cond_where}) \
+         ORDER BY fr.discord_id"
+    );
+    if limit.is_some() {
+        let limit_idx = 2 + cond_binds.len() + 1;
+        sql.push_str(&format!(" LIMIT ${limit_idx}"));
+    }
+
+    let mut q = sqlx::query_scalar::<_, String>(&sql);
     q = q.bind(form_id);
     q = q.bind(optout_ids);
-    for bind in cond_binds {
+    for bind in &cond_binds {
         match bind {
             ConditionBind::Int(v) => {
                 q = q.bind(*v);
@@ -436,7 +473,9 @@ async fn exec_condition_query(
             }
         }
     }
-    q = q.bind(limit as i64);
+    if let Some(l) = limit {
+        q = q.bind(l as i64);
+    }
     Ok(q.fetch_all(pool).await?)
 }
 

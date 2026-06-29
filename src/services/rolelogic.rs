@@ -18,6 +18,33 @@ const COMMIT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// rotation (the API has no rotate endpoint) and not "disabled" (that
 /// returns a different 403 message). Source: `role-link-token.guard.ts`.
 const RL_LINK_GONE_ERROR_MSG: &str = "Invalid or revoked token";
+/// Body substring RoleLogic returns when the role link exists but its owner has
+/// toggled it off. Unlike [`RL_LINK_GONE_ERROR_MSG`] this is NOT a deletion —
+/// the link (and its config) must be left intact; we simply skip syncing it
+/// this cycle instead of erroring and retrying to the dead-letter queue.
+/// Source: `role-link-token.guard.ts` ("This role link is disabled").
+const RL_LINK_DISABLED_ERROR_MSG: &str = "This role link is disabled";
+
+/// Extract the per-tier user cap from a RoleLogic limit-rejection body.
+///
+/// The server raises `HttpException("Maximum <N> users per role link …")`,
+/// which reaches us as `{"errors":"Maximum <N> users per role link …", …}`
+/// — the number is in the message, there is no structured field. Older builds
+/// returned `{"data":{"user_limit":<N>}}`; we accept both. Returns `None` when
+/// the body is some other error (so the caller treats it as a generic failure).
+fn parse_user_limit(body: &str) -> Option<usize> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(n) = v["data"]["user_limit"].as_u64() {
+            return Some(n as usize);
+        }
+    }
+    let after = body.split("Maximum ").nth(1)?;
+    if !after.contains("users per role link") {
+        return None;
+    }
+    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
 
 #[derive(Clone)]
 pub struct RoleLogicClient {
@@ -36,48 +63,6 @@ impl RoleLogicClient {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
         }
-    }
-
-    /// Get user count and limit for a role link.
-    pub async fn get_user_info(
-        &self,
-        guild_id: &str,
-        role_id: &str,
-        token: &str,
-    ) -> Result<(usize, usize), AppError> {
-        let url = format!(
-            "{}/api/role-link/{}/{}/users",
-            self.base_url, guild_id, role_id
-        );
-
-        let resp = self
-            .http
-            .get(&url)
-            .header("Authorization", format!("Token {token}"))
-            .send()
-            .await
-            .map_err(|e| AppError::RoleLogic(e.to_string()))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_GONE_ERROR_MSG) {
-                return Err(AppError::RoleLinkNotFound);
-            }
-            return Err(AppError::RoleLogic(format!(
-                "Get user info failed: {status} - {body}"
-            )));
-        }
-
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AppError::RoleLogic(e.to_string()))?;
-
-        let user_count = body["data"]["user_count"].as_u64().unwrap_or(0) as usize;
-        let user_limit = body["data"]["user_limit"].as_u64().unwrap_or(100) as usize;
-
-        Ok((user_count, user_limit))
     }
 
     pub async fn add_user(
@@ -107,14 +92,18 @@ impl RoleLogicClient {
             if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_GONE_ERROR_MSG) {
                 return Err(AppError::RoleLinkNotFound);
             }
-
-            if (status == reqwest::StatusCode::BAD_REQUEST
-                || status == reqwest::StatusCode::FORBIDDEN)
-                && body.contains("limit")
+            if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_DISABLED_ERROR_MSG)
             {
-                let parsed: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-                let limit = parsed["data"]["user_limit"].as_u64().unwrap_or(100) as usize;
-                return Err(AppError::UserLimitReached { limit });
+                return Err(AppError::RoleLinkDisabled);
+            }
+
+            if matches!(
+                status,
+                reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::FORBIDDEN
+            ) {
+                if let Some(limit) = parse_user_limit(&body) {
+                    return Err(AppError::UserLimitReached { limit });
+                }
             }
 
             return Err(AppError::RoleLogic(format!(
@@ -155,6 +144,10 @@ impl RoleLogicClient {
             let body = resp.text().await.unwrap_or_default();
             if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_GONE_ERROR_MSG) {
                 return Err(AppError::RoleLinkNotFound);
+            }
+            if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_DISABLED_ERROR_MSG)
+            {
+                return Err(AppError::RoleLinkDisabled);
             }
             return Err(AppError::RoleLogic(format!(
                 "Remove user failed: {status} - {body}"
@@ -198,6 +191,21 @@ impl RoleLogicClient {
             let body = resp.text().await.unwrap_or_default();
             if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_GONE_ERROR_MSG) {
                 return Err(AppError::RoleLinkNotFound);
+            }
+            if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_DISABLED_ERROR_MSG)
+            {
+                return Err(AppError::RoleLinkDisabled);
+            }
+            // Over the per-tier cap: the server rejects the whole PUT with the
+            // real limit in the message. Surface it so the caller can re-push a
+            // set capped to that limit instead of failing the sync outright.
+            if matches!(
+                status,
+                reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::FORBIDDEN
+            ) {
+                if let Some(limit) = parse_user_limit(&body) {
+                    return Err(AppError::UserLimitReached { limit });
+                }
             }
             return Err(AppError::RoleLogic(format!(
                 "Replace users failed: {status} - {body}"
@@ -306,6 +314,10 @@ impl RoleLogicClient {
             let body = resp.text().await.unwrap_or_default();
             if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_GONE_ERROR_MSG) {
                 return Err(AppError::RoleLinkNotFound);
+            }
+            if status == reqwest::StatusCode::FORBIDDEN && body.contains(RL_LINK_DISABLED_ERROR_MSG)
+            {
+                return Err(AppError::RoleLinkDisabled);
             }
             return Err(AppError::RoleLogic(format!(
                 "Start upload failed: {status} - {body}"
