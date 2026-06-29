@@ -137,6 +137,15 @@ async fn main() {
     }
     tracing::info!(workers = worker_concurrency, "Job workers started");
 
+    // One-time backfills (e.g. resync every form link after a who-qualifies
+    // change). Spawned so a large enqueue can't delay the server accepting
+    // traffic; it's marker-guarded, so it runs exactly once across boots and
+    // replicas. The workers spawned above drain the jobs it enqueues.
+    let state_for_backfill = Arc::clone(&state);
+    tokio::spawn(async move {
+        tasks::startup_backfill::run(&state_for_backfill).await;
+    });
+
     // All routes nested under the plugin's path prefix (Convention 23).
     let plugin_routes = Router::new()
         // RoleLogic plugin contract
