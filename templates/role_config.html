@@ -660,6 +660,26 @@ function apiHeaders(extra) {
 }
 function apiCreds() { return IS_EMBEDDED ? 'omit' : 'include'; }
 
+// Read-only mode: set when a RoleLogic developer is viewing this config while
+// impersonating the user. The server (admin.rs) is the real guard — it rejects
+// the save XHR — but we also lock the UI so it's clearly view-only.
+const READ_ONLY = '__READ_ONLY__' === '1';
+if (READ_ONLY) {
+  document.documentElement.classList.add('rl-read-only');
+  const style = document.createElement('style');
+  style.textContent =
+    '.rl-read-only #content{pointer-events:none;opacity:.85}' +
+    '.rl-read-only #savebar{display:none !important}' +
+    '.rl-ro-banner{position:sticky;top:0;z-index:50;background:#3a2d05;' +
+    'color:#fbbf24;border-bottom:1px solid #6b5409;padding:8px 16px;' +
+    'font-size:13px;font-weight:600}';
+  document.head.appendChild(style);
+  const banner = document.createElement('div');
+  banner.className = 'rl-ro-banner';
+  banner.textContent = 'Read-only — impersonating a user. Changes are disabled.';
+  document.body.prepend(banner);
+}
+
 document.getElementById('back-link').href = BASE + '/admin/' + GUILD;
 document.getElementById('rid-tag').textContent = ROLE;
 // "Create a form" CTA opens the per-guild admin page where the New-form
@@ -782,7 +802,8 @@ async function load() {
     initial = JSON.stringify(data.config);
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
-    document.getElementById('savebar').style.display = 'flex';
+    // Read-only sessions never show the savebar (CSS hides it too).
+    if (!READ_ONLY) document.getElementById('savebar').style.display = 'flex';
     render();
   } catch (e) {
     document.getElementById('loading').textContent = e.message;
@@ -1261,6 +1282,8 @@ function renderStatus() {
 }
 
 async function save() {
+  // Read-only (impersonation) sessions can't save; the server enforces this too.
+  if (READ_ONLY) { showToast('Read-only while impersonating a user.', 'error'); return; }
   const btn = document.getElementById('save-btn');
   btn.disabled = true;
   btn.textContent = 'Saving…';

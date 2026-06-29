@@ -43,6 +43,12 @@ pub fn build_iframe_config(base_url: &str, guild_id: &str, role_id: &str) -> Val
         "name": "Form Respondent Role",
         "description": "Build a form, gate Discord roles on submissions or answer-conditions.",
         "embed_url": embed_url,
+        // We honor `read_only` impersonation tokens (admin.rs blocks writes when
+        // the iframe-session is read-only), so RoleLogic may hand us an
+        // impersonation token for read-only viewing. Without this flag the
+        // dashboard withholds the token and shows "unavailable while
+        // impersonating" instead.
+        "supports_impersonation_readonly": true,
     })
 }
 

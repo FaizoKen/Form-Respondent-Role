@@ -1389,14 +1389,15 @@ pub async fn role_config_page(
 ) -> Response {
     // Path 1: iframe entry. If the rl_token verifies, we render with an
     // iframe-session token regardless of whether a cookie session exists.
-    let iframe_session = match query.rl_token.as_deref() {
+    // `read_only` is true when a developer is impersonating the user.
+    let (iframe_session, read_only) = match query.rl_token.as_deref() {
         Some(token) if !token.is_empty() => {
             match verify_iframe_entry(&state, &guild_id, &role_id, token).await {
-                Ok(t) => Some(t),
+                Ok((t, ro)) => (Some(t), ro),
                 Err(resp) => return resp,
             }
         }
-        _ => None,
+        _ => (None, false),
     };
 
     // Path 2: direct nav — cookie + manager check.
@@ -1410,7 +1411,8 @@ pub async fn role_config_page(
         .replace("__BASE_URL__", &state.config.base_url)
         .replace("__GUILD_ID__", &guild_id)
         .replace("__ROLE_ID__", &role_id)
-        .replace("__IFRAME_TOKEN__", iframe_session.as_deref().unwrap_or(""));
+        .replace("__IFRAME_TOKEN__", iframe_session.as_deref().unwrap_or(""))
+        .replace("__READ_ONLY__", if read_only { "1" } else { "0" });
 
     // The RoleLogic dashboard re-iframes this page on every navigation to a
     // role tab — a 5-min private cache eliminates the repeat 44 KB download
@@ -1425,7 +1427,7 @@ pub async fn role_config_page(
     )
 }
 
-/// Verify `?rl_token=…` and return a freshly minted iframe-session token.
+/// Verify `?rl_token=…` and return `(iframe_session_token, read_only)`.
 /// On failure, returns a rendered error page (so the iframe shows something
 /// useful instead of an empty body).
 async fn verify_iframe_entry(
@@ -1433,7 +1435,7 @@ async fn verify_iframe_entry(
     guild_id: &str,
     role_id: &str,
     rl_token: &str,
-) -> Result<String, Response> {
+) -> Result<(String, bool), Response> {
     let api_token: Option<String> =
         sqlx::query_scalar("SELECT api_token FROM role_links WHERE guild_id = $1 AND role_id = $2")
             .bind(guild_id)
@@ -1473,12 +1475,26 @@ async fn verify_iframe_entry(
         ));
     }
 
-    Ok(rl_token::mint_iframe_session(
+    if verified.read_only {
+        tracing::info!(
+            guild_id,
+            role_id,
+            target = %verified.discord_id,
+            actor = verified.actor_id.as_deref().unwrap_or("?"),
+            "Role config opened read-only (developer impersonation)"
+        );
+    }
+
+    // Carry the read-only flag into the minted iframe-session so every XHR is
+    // gated; return it too so the page renders in read-only mode.
+    let token = rl_token::mint_iframe_session(
         &verified.discord_id,
         guild_id,
         role_id,
+        verified.read_only,
         &state.config.session_secret,
-    ))
+    );
+    Ok((token, verified.read_only))
 }
 
 fn render_iframe_error(state: &AppState, message: &str) -> Response {
@@ -1507,16 +1523,29 @@ p {{ color: #94a3b8; }}
     admin_html_response(state, StatusCode::FORBIDDEN, body)
 }
 
+/// Outcome of an access check for the role-config endpoints: who is calling and
+/// whether the session is read-only (a developer impersonating the user).
+struct RoleConfigAccess {
+    // Retained for parity with the caller identity (some handlers attribute
+    // actions to it); not read by every endpoint.
+    #[allow(dead_code)]
+    discord_id: String,
+    read_only: bool,
+}
+
 /// Allow either:
 ///   - Cookie session + manager check (direct nav), or
 ///   - `Authorization: Bearer ifs:…` iframe-session bound to this guild/role.
+///
+/// A bearer iframe-session carries a read-only flag (set when a developer is
+/// impersonating the user); the cookie path is always read-write.
 async fn require_role_config_access(
     state: &AppState,
     jar: &CookieJar,
     headers: &HeaderMap,
     guild_id: &str,
     role_id: &str,
-) -> Result<String, AppError> {
+) -> Result<RoleConfigAccess, AppError> {
     if let Some(bearer) = extract_bearer(headers) {
         let Some(s) = rl_token::verify_iframe_session(&bearer, &state.config.session_secret) else {
             return Err(AppError::UnauthorizedWith(
@@ -1528,9 +1557,16 @@ async fn require_role_config_access(
                 "Token does not grant access to this role link.".into(),
             ));
         }
-        return Ok(s.discord_id);
+        return Ok(RoleConfigAccess {
+            discord_id: s.discord_id,
+            read_only: s.read_only,
+        });
     }
-    require_manager(state, jar, guild_id).await
+    let discord_id = require_manager(state, jar, guild_id).await?;
+    Ok(RoleConfigAccess {
+        discord_id,
+        read_only: false,
+    })
 }
 
 fn extract_bearer(headers: &HeaderMap) -> Option<String> {
@@ -1677,7 +1713,17 @@ pub async fn role_config_save(
     if extract_bearer(&headers).is_none() {
         csrf::verify_origin(&headers, &state.allowed_origins)?;
     }
-    require_role_config_access(&state, &jar, &headers, &guild_id, &role_id).await?;
+    let access = require_role_config_access(&state, &jar, &headers, &guild_id, &role_id).await?;
+
+    // Read-only sessions (a developer impersonating the user) may view but not
+    // write. This is the server-side half of the read-only contract — the
+    // dashboard also hides Save, but enforcement must live here since the XHR
+    // reaches the plugin directly.
+    if access.read_only {
+        return Err(AppError::Forbidden(
+            "This configuration is read-only while impersonating a user.".into(),
+        ));
+    }
 
     let link_exists: Option<i64> =
         sqlx::query_scalar("SELECT id FROM role_links WHERE guild_id = $1 AND role_id = $2")
