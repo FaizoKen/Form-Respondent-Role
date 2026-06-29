@@ -26,7 +26,7 @@ struct UserGuildIdsResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct GuildMemberIdsResponse {
+struct GuildOptoutIdsResponse {
     discord_ids: Vec<String>,
 }
 
@@ -67,19 +67,26 @@ pub async fn fetch_user_guild_ids(
     Ok(parsed.guild_ids)
 }
 
-pub async fn fetch_guild_member_ids(
+/// Discord IDs that have opted OUT of this plugin in `guild_id` — via the
+/// guild-wide master toggle or a per-plugin override. The bulk sync builds its
+/// candidate set from the plugin's OWN data (form respondents) rather than the
+/// gateway's OAuth member cache, so it subtracts opt-outs here to honor the
+/// centralized opt-out system even for respondents the gateway has never seen
+/// sign in.
+///
+/// Convention 40: errors bubble up so the sync job retries — a gateway blip
+/// must NEVER be read as "nobody opted out" (which would re-grant the role to
+/// someone who explicitly opted out on the next atomic PUT).
+pub async fn fetch_guild_optout_ids(
     http: &reqwest::Client,
     base: &str,
     key: &str,
     guild_id: &str,
 ) -> Result<Vec<String>, AppError> {
-    let url = format!("{base}/auth/internal/guild_member_ids");
+    let url = format!("{base}/auth/internal/guild_optout_ids");
     let resp = http
         .get(&url)
         .header("X-Internal-Key", key)
-        // `plugin` excludes members who have opted out of this plugin in
-        // this guild, so the atomic role replacement on the next sync
-        // drops their role on Discord's side too.
         .query(&[("guild_id", guild_id), ("plugin", PLUGIN_SLUG)])
         .send()
         .await
@@ -89,11 +96,11 @@ pub async fn fetch_guild_member_ids(
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         return Err(AppError::Internal(format!(
-            "auth_gateway guild_member_ids returned {status}: {body}"
+            "auth_gateway guild_optout_ids returned {status}: {body}"
         )));
     }
 
-    let parsed: GuildMemberIdsResponse = resp
+    let parsed: GuildOptoutIdsResponse = resp
         .json()
         .await
         .map_err(|e| AppError::Internal(format!("auth_gateway response not JSON: {e}")))?;

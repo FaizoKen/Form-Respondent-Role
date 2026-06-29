@@ -23,7 +23,7 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
     let pool = &state.pool;
     let rl_client = &state.rl_client;
 
-    let guild_ids = auth_gateway::fetch_user_guild_ids(
+    let mut guild_ids = auth_gateway::fetch_user_guild_ids(
         &state.http,
         &state.config.auth_gateway_url,
         &state.config.internal_api_key,
@@ -31,11 +31,44 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
     )
     .await?;
 
+    // The gateway list only covers guilds this user is in *and that RoleLogic
+    // has cached via OAuth*. A respondent who completed a form but never opened
+    // the RoleLogic dashboard is absent from it, so per-player sync would never
+    // grant their role until a full per-role-link rebuild ran. Add every guild
+    // where the user has a form_response that the gateway didn't already
+    // return — vetting each for an opt-out (a user who logged in and opted this
+    // guild/plugin out is missing from the gateway list *for that reason*, so
+    // we must not re-add it; a never-logged-in user cannot have opted out).
+    // Convention 40: an opt-out lookup error bubbles up and the job retries.
+    let respondent_guilds: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT guild_id FROM form_responses WHERE discord_id = $1",
+    )
+    .bind(discord_id)
+    .fetch_all(pool)
+    .await?;
+    let known: HashSet<&str> = guild_ids.iter().map(String::as_str).collect();
+    let extra: Vec<String> = respondent_guilds
+        .into_iter()
+        .filter(|g| !known.contains(g.as_str()))
+        .collect();
+    for g in extra {
+        let optouts = auth_gateway::fetch_guild_optout_ids(
+            &state.http,
+            &state.config.auth_gateway_url,
+            &state.config.internal_api_key,
+            &g,
+        )
+        .await?;
+        if !optouts.iter().any(|o| o == discord_id) {
+            guild_ids.push(g);
+        }
+    }
+
     if guild_ids.is_empty() {
         return Ok(());
     }
 
-    // role_links bound to a form, in any guild this user is a member of.
+    // role_links bound to a form, in any guild this user qualifies for.
     let role_links = sqlx::query_as::<_, (String, String, String, String, bool, Value)>(
         "SELECT rl.guild_id, rl.role_id, rl.api_token, rl.form_id, rl.grant_on_any_submission, rl.conditions \
          FROM role_links rl \
@@ -285,33 +318,26 @@ pub async fn sync_for_role_link(
         return Ok(());
     }
 
-    let member_ids = auth_gateway::fetch_guild_member_ids(
+    // Candidate universe = everyone who submitted this form (a `form_responses`
+    // row), minus anyone who opted this guild/plugin out. We deliberately do
+    // NOT intersect with the gateway's guild member list
+    // (`fetch_guild_member_ids`): that list is only the OAuth-derived cache of
+    // users who have signed into RoleLogic and whose 7-day-refreshed guild list
+    // still names this server. A respondent who completed the quiz but never
+    // opened the RoleLogic dashboard — or whose cache has since gone stale — is
+    // absent from it, which is exactly why this link under-granted (e.g. 359
+    // respondents collapsing to ~100). RoleLogic's bot is the real authority on
+    // who is actually in the guild when it applies the role, so pushing a
+    // non-member is harmless; opt-outs are still honored centrally below.
+    // Convention 40: an opt-out lookup error bubbles up and the job retries —
+    // we never treat a hiccup as "nobody opted out".
+    let optout_ids = auth_gateway::fetch_guild_optout_ids(
         &state.http,
         &state.config.auth_gateway_url,
         &state.config.internal_api_key,
         guild_id,
     )
     .await?;
-
-    if member_ids.is_empty() {
-        match rl_client
-            .upload_users(guild_id, role_id, &[], &api_token)
-            .await
-        {
-            Ok(_) => {}
-            Err(AppError::RoleLinkNotFound) => {
-                delete_orphan_role_link(guild_id, role_id, pool).await;
-                return Ok(());
-            }
-            Err(e) => return Err(e),
-        }
-        sqlx::query("DELETE FROM role_assignments WHERE guild_id = $1 AND role_id = $2")
-            .bind(guild_id)
-            .bind(role_id)
-            .execute(pool)
-            .await?;
-        return Ok(());
-    }
 
     // The user_limit decides how many qualifying IDs we keep before the full
     // PUT rebuild below. If we cannot read it, DO NOT fall back to a small
@@ -328,7 +354,8 @@ pub async fn sync_for_role_link(
             Err(e) => return Err(e),
         };
 
-    // Fixed binds: $1 = form_id, $2 = member_ids, then condition binds, then limit.
+    // Fixed binds: $1 = form_id, $2 = optout_ids, then condition binds, then
+    // limit. `<> ALL($2)` keeps everyone when the opt-out list is empty.
     let (cond_where, cond_binds) = condition_eval::build_condition_where(&conditions, 2);
     let limit_idx = 2 + cond_binds.len() + 1;
 
@@ -337,7 +364,7 @@ pub async fn sync_for_role_link(
          FROM form_responses fr \
          WHERE fr.form_id = $1 \
            AND fr.discord_id <> '' \
-           AND fr.discord_id = ANY($2::text[]) \
+           AND fr.discord_id <> ALL($2::text[]) \
            AND ({cond_where}) \
          ORDER BY fr.discord_id \
          LIMIT ${limit_idx}",
@@ -346,7 +373,7 @@ pub async fn sync_for_role_link(
     let qualifying_ids = exec_condition_query(
         &query_str,
         &form_id,
-        &member_ids,
+        &optout_ids,
         &cond_binds,
         user_limit,
         pool,
@@ -391,14 +418,15 @@ pub async fn sync_for_role_link(
 async fn exec_condition_query(
     query: &str,
     form_id: &str,
-    member_ids: &[String],
+    // Bound at `$2` — the opt-out ID array the query filters out via `<> ALL`.
+    optout_ids: &[String],
     cond_binds: &[ConditionBind],
     limit: usize,
     pool: &sqlx::PgPool,
 ) -> Result<Vec<String>, AppError> {
     let mut q = sqlx::query_scalar::<_, String>(query);
     q = q.bind(form_id);
-    q = q.bind(member_ids);
+    q = q.bind(optout_ids);
     for bind in cond_binds {
         match bind {
             ConditionBind::Int(v) => {
