@@ -313,6 +313,11 @@ pub async fn sync_for_role_link(
         return Ok(());
     }
 
+    // The user_limit decides how many qualifying IDs we keep before the full
+    // PUT rebuild below. If we cannot read it, DO NOT fall back to a small
+    // default and rebuild — that would destructively truncate a premium link's
+    // user set (e.g. down to 100) on a transient API blip. Propagate instead
+    // so the job retries with the real limit intact.
     let (_user_count, user_limit) =
         match rl_client.get_user_info(guild_id, role_id, &api_token).await {
             Ok(v) => v,
@@ -320,7 +325,7 @@ pub async fn sync_for_role_link(
                 delete_orphan_role_link(guild_id, role_id, pool).await;
                 return Ok(());
             }
-            Err(_) => (0, 100),
+            Err(e) => return Err(e),
         };
 
     // Fixed binds: $1 = form_id, $2 = member_ids, then condition binds, then limit.
