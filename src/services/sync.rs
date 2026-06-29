@@ -40,12 +40,11 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
     // guild/plugin out is missing from the gateway list *for that reason*, so
     // we must not re-add it; a never-logged-in user cannot have opted out).
     // Convention 40: an opt-out lookup error bubbles up and the job retries.
-    let respondent_guilds: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT guild_id FROM form_responses WHERE discord_id = $1",
-    )
-    .bind(discord_id)
-    .fetch_all(pool)
-    .await?;
+    let respondent_guilds: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT guild_id FROM form_responses WHERE discord_id = $1")
+            .bind(discord_id)
+            .fetch_all(pool)
+            .await?;
     let known: HashSet<&str> = guild_ids.iter().map(String::as_str).collect();
     let extra: Vec<String> = respondent_guilds
         .into_iter()
