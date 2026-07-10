@@ -1737,8 +1737,8 @@ pub async fn role_config_data(
     // All forms for this guild, with schema inline so the rule builder can
     // populate question / option pickers without an extra fetch when the
     // admin changes the form binding.
-    let form_rows = sqlx::query_as::<_, (uuid::Uuid, String, bool, bool, Value)>(
-        "SELECT id, title, is_quiz, archived, schema FROM forms WHERE guild_id = $1 \
+    let form_rows = sqlx::query_as::<_, (uuid::Uuid, String, bool, bool, Option<i32>, Value)>(
+        "SELECT id, title, is_quiz, archived, passing_score, schema FROM forms WHERE guild_id = $1 \
          ORDER BY archived ASC, updated_at DESC",
     )
     .bind(&guild_id)
@@ -1747,7 +1747,7 @@ pub async fn role_config_data(
 
     let forms: Vec<Value> = form_rows
         .into_iter()
-        .map(|(id, title, is_quiz, archived, schema_json)| {
+        .map(|(id, title, is_quiz, archived, passing_score, schema_json)| {
             let parsed: Option<FormSchema> = serde_json::from_value(schema_json).ok();
             let questions: Vec<Value> = parsed
                 .as_ref()
@@ -1781,6 +1781,11 @@ pub async fn role_config_data(
                 "title": title,
                 "is_quiz": is_quiz,
                 "archived": archived,
+                // The quiz's own pass threshold (pass = score >= passing_score).
+                // The rule builder uses it to flag conditions that disagree
+                // with what respondents are told (e.g. "> mark" silently
+                // excluding members who scored exactly the pass mark).
+                "passing_score": passing_score,
                 "questions": questions,
             })
         })

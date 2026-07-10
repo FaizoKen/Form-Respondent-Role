@@ -105,33 +105,36 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
 
     let mut actions: Vec<Action> = Vec::new();
     for (guild_id, role_id, api_token, form_id, grant_any, raw_conditions) in &role_links {
-        // Look up this user's most recent response to this form.
-        let resp_row = sqlx::query_as::<_, (Value, Option<i32>)>(
+        // Evaluate ALL of this user's responses to the form and qualify on any
+        // match — the same semantics as the bulk per-role-link SQL (which does
+        // a DISTINCT over every matching row). Retry-governed and editable
+        // forms keep one canonical row per member, so this only changes
+        // behaviour on unlimited multi-row forms, where the old
+        // latest-row-only check would revoke a role the bulk sync had granted
+        // from an earlier qualifying submission (grant/revoke flapping).
+        let resp_rows = sqlx::query_as::<_, (Value, Option<i32>)>(
             "SELECT answers, total_score FROM form_responses \
-             WHERE form_id = $1 AND discord_id = $2 \
-             ORDER BY last_edited_at DESC LIMIT 1",
+             WHERE form_id = $1 AND discord_id = $2",
         )
         .bind(form_id)
         .bind(discord_id)
-        .fetch_optional(pool)
+        .fetch_all(pool)
         .await?;
 
-        let qualifies = if let Some((answers, total_score)) = resp_row {
-            let conditions: Vec<Condition> = raw_conditions
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|v| serde_json::from_value::<Condition>(v.clone()).ok())
-                .collect();
+        let conditions: Vec<Condition> = raw_conditions
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|v| serde_json::from_value::<Condition>(v.clone()).ok())
+            .collect();
 
+        let qualifies = resp_rows.iter().any(|(answers, total_score)| {
             let data = ResponseEvalData {
-                answers: &answers,
+                answers,
                 total_score: total_score.map(|t| t as i64),
             };
             condition_eval::evaluate(*grant_any, &conditions, &data)
-        } else {
-            false
-        };
+        });
 
         let currently_assigned = existing.contains(&(guild_id.clone(), role_id.clone()));
         match (qualifies, currently_assigned) {

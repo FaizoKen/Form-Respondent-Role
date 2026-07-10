@@ -9,8 +9,10 @@
 //! atomic against concurrent submits from the same member.
 //!
 //! Invariant kept by the caller: this only governs forms that keep a single
-//! canonical response per (form, member). That is what makes the two sync
-//! paths agree on "which attempt counts" — see migration 009.
+//! canonical response per (form, member), so "which attempt counts" is
+//! unambiguous — see migration 009. (Both sync paths independently qualify a
+//! member when ANY of their stored responses matches, so multi-row unlimited
+//! forms stay consistent too.)
 
 use chrono::{DateTime, Duration, Utc};
 

@@ -365,6 +365,13 @@ select {
   font-size: 11px;
   font-style: italic;
 }
+.cond-warn {
+  grid-column: 1 / -1;
+  color: var(--warn-text);
+  font-size: 12.5px;
+  padding-top: 4px;
+}
+.cond-warn strong { font-weight: 600; }
 .btn-icon {
   background: transparent;
   border: 1px solid var(--border-strong);
@@ -1069,9 +1076,17 @@ function renderConditions() {
       return;
     }
     const kind = useQuizScore ? '__quiz_total_score__' : firstQ.kind;
-    const op = operatorsForKind(kind)[0]?.key || 'eq';
     const question = useQuizScore ? null : firstQ;
-    conds.push({ target: targetId, operator: op, value: defaultValueFor(op, question), value_end: null });
+    // Quiz with a declared pass mark: pre-fill the whole rule as
+    // "score ≥ pass mark" so it matches exactly the members the quiz told
+    // "you passed" (pass = score >= passing_score). A strict ">" default here
+    // is an off-by-one trap — it drops members who score exactly the mark.
+    if (useQuizScore && typeof form.passing_score === 'number') {
+      conds.push({ target: targetId, operator: 'gte', value: String(form.passing_score), value_end: null });
+    } else {
+      const op = operatorsForKind(kind)[0]?.key || 'eq';
+      conds.push({ target: targetId, operator: op, value: defaultValueFor(op, question), value_end: null });
+    }
     markDirty();
     render();
   };
@@ -1113,12 +1128,19 @@ function renderCondRow(form, cond, idx) {
     cond.target = targetSel.value;
     const newQ = questionById(form, cond.target);
     const newKind = newQ ? newQ.kind : '__quiz_total_score__';
-    // Reset operator if the current one isn't valid for the new kind.
-    const validOps = operatorsForKind(newKind);
-    if (!validOps.find(o => o.key === cond.operator)) {
-      cond.operator = validOps[0]?.key || 'eq';
+    if (cond.target === '__quiz_total_score__' && form && typeof form.passing_score === 'number') {
+      // Same pre-fill as Add condition: "score ≥ pass mark" matches exactly
+      // the members the quiz told "you passed".
+      cond.operator = 'gte';
+      cond.value = String(form.passing_score);
+    } else {
+      // Reset operator if the current one isn't valid for the new kind.
+      const validOps = operatorsForKind(newKind);
+      if (!validOps.find(o => o.key === cond.operator)) {
+        cond.operator = validOps[0]?.key || 'eq';
+      }
+      cond.value = defaultValueFor(cond.operator, newQ);
     }
-    cond.value = defaultValueFor(cond.operator, newQ);
     cond.value_end = null;
     markDirty();
     render();
@@ -1176,6 +1198,32 @@ function renderCondRow(form, cond, idx) {
     meta.textContent = `Question "${cond.target}" no longer exists on the chosen form. Pick another question or remove this row.`;
     row.classList.add('invalid');
     row.appendChild(meta);
+  }
+
+  // ---- Pass-mark guidance for quiz-total-score rules ----
+  // The quiz itself tells respondents "you passed" when score >= passing_score,
+  // so a "> pass mark" rule silently excludes members who scored exactly the
+  // mark — they see "passed" but never get the role. Flag that mismatch
+  // loudly; otherwise just surface the mark so the admin can line the rule up.
+  const passMark = form && form.is_quiz ? form.passing_score : null;
+  if (cond.target === '__quiz_total_score__' && typeof passMark === 'number') {
+    const note = document.createElement('div');
+    const updateNote = () => {
+      if (cond.operator === 'gt' && Number(cond.value) === passMark) {
+        note.className = 'cond-warn';
+        note.innerHTML = `⚠ This quiz's pass mark is <strong>${passMark}</strong> (pass = score ≥ ${passMark}). ` +
+          `"&gt; greater than ${passMark}" excludes members who score exactly ${passMark} — they're told they passed but won't get the role. ` +
+          `Did you mean <strong>"≥ at least ${passMark}"</strong>?`;
+      } else {
+        note.className = 'cond-meta';
+        note.textContent = `This quiz's pass mark is ${passMark} (pass = score ≥ ${passMark}).`;
+      }
+    };
+    updateNote();
+    // Value edits don't re-render the row (that would steal focus), so keep
+    // the note live off the input events that bubble up from the value widget.
+    row.addEventListener('input', updateNote);
+    row.appendChild(note);
   }
 
   return row;
