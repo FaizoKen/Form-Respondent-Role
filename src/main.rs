@@ -214,7 +214,15 @@ async fn main() {
         // Health & static
         .route("/favicon.ico", get(routes::health::favicon))
         .route("/health", get(routes::health::health))
-        .route("/ready", get(routes::health::ready));
+        .route("/ready", get(routes::health::ready))
+        // Read-only impersonation backstop (BLUEPRINT §1b.10): no request
+        // carrying a read-only iframe-session may mutate state, regardless
+        // of which handler it targets. Individual handlers enforce this too;
+        // the layer guarantees future write routes can't forget.
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            services::read_only_guard::block_read_only_writes,
+        ));
 
     // -------- Middleware stack --------
     //

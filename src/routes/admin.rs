@@ -127,6 +127,106 @@ async fn require_manager_html(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Read-only impersonation access (BLUEPRINT §1b.10)
+//
+// When a RoleLogic developer impersonates a user, the role-config iframe gets
+// a READ-ONLY iframe-session. That session also unlocks the guild's other
+// admin surfaces (forms list, builder, responses) for *viewing*: page links
+// carry it as `?ifs=…` (the developer's browser has no plugin cookie), and
+// the pages' XHRs send it as a bearer. Writes are rejected by the mutating
+// handlers (cookie-only) and by `services::read_only_guard` as a backstop.
+// ---------------------------------------------------------------------------
+
+/// Query params accepted by every guild-scoped admin page.
+#[derive(Deserialize)]
+pub struct AdminPageQuery {
+    /// Read-only iframe-session hand-off (developer impersonation). URL-carried
+    /// sessions are accepted ONLY when the token is read-only — a read-write
+    /// token must never ride in a URL.
+    #[serde(default)]
+    ifs: Option<String>,
+}
+
+/// Check the optional `?ifs=` read-only entry on a guild-scoped admin page.
+///
+/// - `Ok(None)` — no token supplied; caller falls through to the cookie path.
+/// - `Ok(Some(token))` — valid read-only session for this guild; render the
+///   page in read-only mode with `token` re-embedded for XHRs and links.
+/// - `Err(page)` — token supplied but invalid/expired/out-of-scope. Boxed:
+///   `Response` is large and this is the cold path (clippy::result_large_err).
+fn check_read_only_page_entry(
+    state: &AppState,
+    guild_id: &str,
+    page: &'static str,
+    ifs: Option<&str>,
+) -> Result<Option<String>, Box<Response>> {
+    let Some(token) = ifs.filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    let Some(session) = rl_token::verify_iframe_session(token, &state.config.session_secret) else {
+        return Err(Box::new(render_iframe_error(
+            state,
+            "This read-only view has expired. Reopen it from the RoleLogic dashboard.",
+        )));
+    };
+    if !session.read_only || session.guild_id != guild_id {
+        return Err(Box::new(render_iframe_error(
+            state,
+            "This link does not grant access to this page.",
+        )));
+    }
+    tracing::info!(
+        guild_id,
+        page,
+        target = %session.discord_id,
+        actor = session.actor_id.as_deref().unwrap_or("?"),
+        "Admin page opened read-only (developer impersonation)"
+    );
+    Ok(Some(token.to_string()))
+}
+
+/// Access check for guild-scoped read endpoints (forms list, builder data,
+/// responses data). Allows either:
+///   - Cookie session + manager check (normal admins), or
+///   - a READ-ONLY `Authorization: Bearer ifs:…` iframe-session bound to this
+///     guild (developer impersonation).
+///
+/// The bearer path deliberately requires `read_only`: read-write iframe
+/// sessions exist only for the role-config page and get no guild-wide grant.
+/// Never use this for a mutating endpoint.
+async fn require_guild_view_access(
+    state: &AppState,
+    jar: &CookieJar,
+    headers: &HeaderMap,
+    guild_id: &str,
+) -> Result<(), AppError> {
+    if let Some(bearer) = extract_bearer(headers) {
+        let Some(session) = rl_token::verify_iframe_session(&bearer, &state.config.session_secret)
+        else {
+            return Err(AppError::UnauthorizedWith(
+                "Your session expired. Reopen the plugin in the RoleLogic dashboard.".into(),
+            ));
+        };
+        if !session.read_only || session.guild_id != guild_id {
+            return Err(AppError::Forbidden(
+                "Token does not grant access to this page.".into(),
+            ));
+        }
+        return Ok(());
+    }
+    require_manager(state, jar, guild_id).await?;
+    Ok(())
+}
+
+/// Fill the read-only placeholders shared by every guild-scoped admin page
+/// template. `ro_token` is `Some` when the page was opened via a verified
+/// `?ifs=` read-only session.
+fn with_read_only_placeholders(body: String, ro_token: Option<&str>) -> String {
+    body.replace("__IFS_TOKEN__", ro_token.unwrap_or(""))
+        .replace("__READ_ONLY__", if ro_token.is_some() { "1" } else { "0" })
+}
+
 fn render_signin_page(state: &AppState) -> Response {
     let base_url = &state.config.base_url;
     let body = format!(
@@ -283,22 +383,34 @@ pub async fn list_page(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
     Path(guild_id): Path<String>,
+    Query(query): Query<AdminPageQuery>,
 ) -> Response {
-    if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
-        return resp;
+    let ro_token =
+        match check_read_only_page_entry(&state, &guild_id, "admin_list", query.ifs.as_deref()) {
+            Ok(t) => t,
+            Err(resp) => return *resp,
+        };
+    if ro_token.is_none() {
+        if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
+            return resp;
+        }
     }
     let body = ADMIN_LIST_TEMPLATE
         .replace("__BASE_URL__", &state.config.base_url)
         .replace("__GUILD_ID__", &guild_id);
-    html_response(&state, body)
+    html_response(
+        &state,
+        with_read_only_placeholders(body, ro_token.as_deref()),
+    )
 }
 
 pub async fn list_data(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(guild_id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    require_manager(&state, &jar, &guild_id).await?;
+    require_guild_view_access(&state, &jar, &headers, &guild_id).await?;
 
     let rows = sqlx::query_as::<_, (uuid::Uuid, String, String, bool, bool, chrono::DateTime<chrono::Utc>, Option<i64>, Option<i64>)>(
         "SELECT f.id, f.slug, f.title, f.is_quiz, f.archived, f.updated_at, \
@@ -491,23 +603,35 @@ pub async fn builder_page(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
     Path((guild_id, form_id)): Path<(String, String)>,
+    Query(query): Query<AdminPageQuery>,
 ) -> Response {
-    if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
-        return resp;
+    let ro_token =
+        match check_read_only_page_entry(&state, &guild_id, "builder", query.ifs.as_deref()) {
+            Ok(t) => t,
+            Err(resp) => return *resp,
+        };
+    if ro_token.is_none() {
+        if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
+            return resp;
+        }
     }
     let body = BUILDER_TEMPLATE
         .replace("__BASE_URL__", &state.config.base_url)
         .replace("__GUILD_ID__", &guild_id)
         .replace("__FORM_ID__", &form_id);
-    html_response(&state, body)
+    html_response(
+        &state,
+        with_read_only_placeholders(body, ro_token.as_deref()),
+    )
 }
 
 pub async fn builder_data(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path((guild_id, form_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, AppError> {
-    require_manager(&state, &jar, &guild_id).await?;
+    require_guild_view_access(&state, &jar, &headers, &guild_id).await?;
     let uuid = uuid::Uuid::parse_str(&form_id)
         .map_err(|_| AppError::BadRequest("Invalid form id.".into()))?;
 
@@ -1046,23 +1170,35 @@ pub async fn responses_page(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
     Path((guild_id, form_id)): Path<(String, String)>,
+    Query(query): Query<AdminPageQuery>,
 ) -> Response {
-    if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
-        return resp;
+    let ro_token =
+        match check_read_only_page_entry(&state, &guild_id, "responses", query.ifs.as_deref()) {
+            Ok(t) => t,
+            Err(resp) => return *resp,
+        };
+    if ro_token.is_none() {
+        if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
+            return resp;
+        }
     }
     let body = RESPONSES_TEMPLATE
         .replace("__BASE_URL__", &state.config.base_url)
         .replace("__GUILD_ID__", &guild_id)
         .replace("__FORM_ID__", &form_id);
-    html_response(&state, body)
+    html_response(
+        &state,
+        with_read_only_placeholders(body, ro_token.as_deref()),
+    )
 }
 
 pub async fn responses_data(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path((guild_id, form_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, AppError> {
-    require_manager(&state, &jar, &guild_id).await?;
+    require_guild_view_access(&state, &jar, &headers, &guild_id).await?;
     let uuid = uuid::Uuid::parse_str(&form_id)
         .map_err(|_| AppError::BadRequest("Invalid form id.".into()))?;
 
@@ -1485,13 +1621,16 @@ async fn verify_iframe_entry(
         );
     }
 
-    // Carry the read-only flag into the minted iframe-session so every XHR is
-    // gated; return it too so the page renders in read-only mode.
+    // Carry the read-only flag (and the impersonating developer's id, for
+    // audit logs) into the minted iframe-session so every XHR — and every
+    // `?ifs=`-linked sub-page — is gated; return it too so the page renders
+    // in read-only mode.
     let token = rl_token::mint_iframe_session(
         &verified.discord_id,
         guild_id,
         role_id,
         verified.read_only,
+        verified.actor_id.as_deref(),
         &state.config.session_secret,
     );
     Ok((token, verified.read_only))

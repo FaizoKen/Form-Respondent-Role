@@ -563,6 +563,40 @@ const BASE = '__BASE_URL__';
 const GUILD = '__GUILD_ID__';
 const ORIGIN = new URL(BASE).origin;
 
+// Read-only impersonation mode (BLUEPRINT §1b.10): non-empty when a RoleLogic
+// developer opened this page through a read-only iframe-session hand-off
+// (`?ifs=…` from the role-config iframe). XHRs then authenticate with the
+// bearer token instead of cookies, links to sibling pages propagate the
+// session, and every mutating affordance is inert. The server rejects writes
+// regardless — this is UX, not the enforcement.
+const IFS_TOKEN = '__IFS_TOKEN__';
+const READ_ONLY = '__READ_ONLY__' === '1';
+const RO_QS = READ_ONLY && IFS_TOKEN ? '?ifs=' + encodeURIComponent(IFS_TOKEN) : '';
+
+function apiHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  if (IFS_TOKEN) h['Authorization'] = 'Bearer ' + IFS_TOKEN;
+  return h;
+}
+function apiCreds() { return IFS_TOKEN ? 'omit' : 'include'; }
+function roBlocked() { showToast('Read-only while impersonating a user.'); }
+
+if (READ_ONLY) {
+  const style = document.createElement('style');
+  style.textContent =
+    '.rl-ro-banner{position:sticky;top:0;z-index:60;background:#3a2d05;' +
+    'color:#fbbf24;border-bottom:1px solid #6b5409;padding:8px 16px;' +
+    'font-size:13px;font-weight:600}';
+  document.head.appendChild(style);
+  const banner = document.createElement('div');
+  banner.className = 'rl-ro-banner';
+  banner.textContent = 'Read-only — impersonating a user. Browse freely; changes are disabled.';
+  document.body.prepend(banner);
+  const newBtn = document.getElementById('new-btn');
+  newBtn.disabled = true;
+  newBtn.title = 'Read-only while impersonating a user';
+}
+
 function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
 
 function relTime(iso) {
@@ -578,8 +612,12 @@ function relTime(iso) {
 
 async function load() {
   try {
-    const res = await fetch(BASE + '/admin/' + GUILD + '/forms', { credentials: 'include' });
+    const res = await fetch(BASE + '/admin/' + GUILD + '/forms', { credentials: apiCreds(), headers: apiHeaders() });
     if (res.status === 401) {
+      if (READ_ONLY) {
+        document.getElementById('list').innerHTML = renderEmpty('Read-only view expired', 'Reopen this page from the plugin panel in the RoleLogic dashboard.', false);
+        return;
+      }
       location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname);
       return;
     }
@@ -590,11 +628,14 @@ async function load() {
     }
     setupViewPermission(data.view_permission || 'managers');
     if (!data.forms.length) {
-      document.getElementById('list').innerHTML = renderEmpty('No forms yet', 'Click <strong>New form</strong> to create your first one. You can start from a template or a blank canvas.', true);
+      document.getElementById('list').innerHTML = renderEmpty('No forms yet', READ_ONLY ? 'This server has no forms.' : 'Click <strong>New form</strong> to create your first one. You can start from a template or a blank canvas.', !READ_ONLY);
       const cta = document.querySelector('#list [data-empty-cta]');
       if (cta) cta.onclick = openTemplateModal;
       return;
     }
+    const delBtn = f => READ_ONLY
+      ? `<button class="btn-icon" disabled title="Read-only while impersonating a user" aria-label="Delete ${escapeHtml(f.title)} (disabled)" style="opacity:.4;cursor:not-allowed;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`
+      : `<button class="btn-icon" data-del-form="${f.id}" data-title="${escapeHtml(f.title)}" data-responses="${f.response_count}" data-links="${f.bound_role_links_count}" title="Delete form" aria-label="Delete ${escapeHtml(f.title)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`;
     document.getElementById('list').innerHTML = data.forms.map(f => `
       <div class="card"><div class="row">
         <div class="row-main">
@@ -611,9 +652,9 @@ async function load() {
           </div>
         </div>
         <div class="row-actions">
-          <a class="btn btn-sec" href="${BASE}/admin/${GUILD}/forms/${f.id}/responses">Responses</a>
-          <a class="btn" href="${BASE}/admin/${GUILD}/forms/${f.id}">Edit</a>
-          <button class="btn-icon" data-del-form="${f.id}" data-title="${escapeHtml(f.title)}" data-responses="${f.response_count}" data-links="${f.bound_role_links_count}" title="Delete form" aria-label="Delete ${escapeHtml(f.title)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          <a class="btn btn-sec" href="${BASE}/admin/${GUILD}/forms/${f.id}/responses${RO_QS}">Responses</a>
+          <a class="btn" href="${BASE}/admin/${GUILD}/forms/${f.id}${RO_QS}">${READ_ONLY ? 'View' : 'Edit'}</a>
+          ${delBtn(f)}
         </div>
       </div></div>
     `).join('');
@@ -635,10 +676,13 @@ function setupViewPermission(initial) {
   document.querySelectorAll('.access-radio').forEach(el => {
     const v = el.dataset.vp;
     el.classList.toggle('selected', v === viewPermission);
-    el.querySelector('input').checked = (v === viewPermission);
+    const input = el.querySelector('input');
+    input.checked = (v === viewPermission);
+    input.disabled = READ_ONLY;
     el.onclick = (e) => {
       // Stop the synthetic click from the inner <input> from firing twice.
       if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') e.preventDefault();
+      if (READ_ONLY) { roBlocked(); return; }
       if (v === viewPermission) return;
       saveViewPermission(v);
     };
@@ -646,6 +690,7 @@ function setupViewPermission(initial) {
 }
 
 async function saveViewPermission(next) {
+  if (READ_ONLY) { roBlocked(); return; }
   const prev = viewPermission;
   viewPermission = next;
   document.querySelectorAll('.access-radio').forEach(el => {
@@ -709,6 +754,7 @@ document.getElementById('modal-bg').onclick = (e) => { if (e.target.id === 'moda
 
 document.querySelectorAll('.tpl').forEach(el => {
   const handler = async () => {
+    if (READ_ONLY) { roBlocked(); return; }
     const tpl = el.dataset.tpl;
     try {
       const res = await fetch(BASE + '/admin/' + GUILD + '/forms', {
@@ -734,6 +780,7 @@ let pendingDelete = null;
 document.getElementById('list').addEventListener('click', e => {
   const btn = e.target.closest('[data-del-form]');
   if (!btn) return;
+  if (READ_ONLY) { roBlocked(); return; }
   pendingDelete = {
     id: btn.dataset.delForm,
     title: btn.dataset.title,

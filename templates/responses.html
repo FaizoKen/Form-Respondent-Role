@@ -369,8 +369,41 @@ const BASE = '__BASE_URL__';
 const GUILD = '__GUILD_ID__';
 const FORM_ID = '__FORM_ID__';
 const ORIGIN = new URL(BASE).origin;
-document.getElementById('back-btn').href = BASE + '/admin/' + GUILD;
+
+// Read-only impersonation mode (BLUEPRINT §1b.10): non-empty when a RoleLogic
+// developer opened this page through a read-only iframe-session hand-off
+// (`?ifs=…`). XHRs authenticate with the bearer token instead of cookies and
+// mutating affordances (delete row, clear all, CSV export) are removed. The
+// server rejects writes regardless — this is UX, not the enforcement.
+const IFS_TOKEN = '__IFS_TOKEN__';
+const READ_ONLY = '__READ_ONLY__' === '1';
+const RO_QS = READ_ONLY && IFS_TOKEN ? '?ifs=' + encodeURIComponent(IFS_TOKEN) : '';
+
+function apiHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  if (IFS_TOKEN) h['Authorization'] = 'Bearer ' + IFS_TOKEN;
+  return h;
+}
+function apiCreds() { return IFS_TOKEN ? 'omit' : 'include'; }
+
+document.getElementById('back-btn').href = BASE + '/admin/' + GUILD + RO_QS;
 document.getElementById('csv-btn').href = BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses/csv';
+
+if (READ_ONLY) {
+  const style = document.createElement('style');
+  style.textContent =
+    '.rl-ro-banner{position:sticky;top:0;z-index:60;background:#3a2d05;' +
+    'color:#fbbf24;border-bottom:1px solid #6b5409;padding:8px 16px;' +
+    'font-size:13px;font-weight:600}';
+  document.head.appendChild(style);
+  const banner = document.createElement('div');
+  banner.className = 'rl-ro-banner';
+  banner.textContent = 'Read-only — impersonating a user. Browse freely; changes are disabled.';
+  document.body.prepend(banner);
+  // CSV export is a cookie-authenticated navigation (a bearer can't ride a
+  // link click) and bulk export isn't part of the read-only debugging grant.
+  document.getElementById('csv-btn').style.display = 'none';
+}
 
 function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
 
@@ -430,6 +463,7 @@ function gotoLogin() {
 }
 
 async function deleteResponse(btn) {
+  if (READ_ONLY) return;
   const id = btn.dataset.delId;
   const user = btn.dataset.delUser || 'this member';
   if (!confirm('Delete this response from ' + user + '?\n\nIf a role is gated on this form, it will be removed from them shortly.')) return;
@@ -450,6 +484,7 @@ async function deleteResponse(btn) {
 }
 
 async function clearAllResponses(btn) {
+  if (READ_ONLY) return;
   if (!confirm('Delete ALL responses for this form?\n\nThis cannot be undone. Members who only qualified through this form will lose the gated role shortly.')) return;
   btn.disabled = true;
   const prev = btn.textContent;
@@ -472,8 +507,16 @@ async function clearAllResponses(btn) {
 
 async function load() {
   try {
-    const res = await fetch(BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses/data', { credentials: 'include' });
-    if (res.status === 401) { location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname); return; }
+    const res = await fetch(BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses/data', { credentials: apiCreds(), headers: apiHeaders() });
+    if (res.status === 401) {
+      if (READ_ONLY) {
+        document.getElementById('content').innerHTML = emptyState('Read-only view expired', 'Reopen this page from the plugin panel in the RoleLogic dashboard.');
+        document.getElementById('subtitle').textContent = '';
+        return;
+      }
+      location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname);
+      return;
+    }
     const data = await res.json();
     if (!res.ok) {
       document.getElementById('content').innerHTML = emptyState('Failed to load', data.error || 'Try refreshing the page.');
@@ -549,11 +592,12 @@ function render(data) {
 
   // Responses table
   h += '<div class="card"><div class="card-head"><h3>All responses (' + data.responses.length + ')</h3>'
-    + '<button type="button" class="btn btn-danger btn-sm" id="clear-all-btn">Clear all responses</button></div>';
+    + (READ_ONLY ? '' : '<button type="button" class="btn btn-danger btn-sm" id="clear-all-btn">Clear all responses</button>') + '</div>';
   h += '<div class="table-wrap"><table><thead><tr><th>User</th><th>Submitted</th>';
   if (data.is_quiz) h += '<th>Score</th>';
   for (const q of answerable) h += '<th>' + escapeHtml(q.title) + '</th>';
-  h += '<th>Actions</th></tr></thead><tbody>';
+  if (!READ_ONLY) h += '<th>Actions</th>';
+  h += '</tr></thead><tbody>';
   for (const r of data.responses) {
     h += '<tr><td class="user">' + escapeHtml(r.discord_id) + '</td><td class="when">' + new Date(r.submitted_at).toLocaleString() + '</td>';
     if (data.is_quiz) h += '<td><span class="score-pill">' + (r.total_score ?? '–') + '</span></td>';
@@ -572,10 +616,12 @@ function render(data) {
       } else if (v != null) display = String(v);
       h += '<td>' + (display ? escapeHtml(display) : '<span style="color:var(--text-faint);">—</span>') + '</td>';
     }
-    h += '<td class="actions"><button type="button" class="row-del" title="Delete response"'
-      + ' data-del-id="' + escapeHtml(r.id) + '" data-del-user="' + escapeHtml(r.discord_id) + '">'
-      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
-      + '</button></td>';
+    if (!READ_ONLY) {
+      h += '<td class="actions"><button type="button" class="row-del" title="Delete response"'
+        + ' data-del-id="' + escapeHtml(r.id) + '" data-del-user="' + escapeHtml(r.discord_id) + '">'
+        + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
+        + '</button></td>';
+    }
     h += '</tr>';
   }
   h += '</tbody></table></div></div>';

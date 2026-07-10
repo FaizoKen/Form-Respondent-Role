@@ -1115,6 +1115,56 @@ const GUILD = '__GUILD_ID__';
 const FORM_ID = '__FORM_ID__';
 const ORIGIN = new URL(BASE).origin;
 
+// Read-only impersonation mode (BLUEPRINT §1b.10): non-empty when a RoleLogic
+// developer opened this page through a read-only iframe-session hand-off
+// (`?ifs=…`). The builder becomes a viewer: the canvas, inspector, and
+// settings modal all open for inspection, but every editing affordance is
+// inert and Save/Delete are gone. The server rejects writes regardless —
+// this is UX, not the enforcement.
+const IFS_TOKEN = '__IFS_TOKEN__';
+const READ_ONLY = '__READ_ONLY__' === '1';
+const RO_QS = READ_ONLY && IFS_TOKEN ? '?ifs=' + encodeURIComponent(IFS_TOKEN) : '';
+
+function apiHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  if (IFS_TOKEN) h['Authorization'] = 'Bearer ' + IFS_TOKEN;
+  return h;
+}
+function apiCreds() { return IFS_TOKEN ? 'omit' : 'include'; }
+function roBlocked() { showToast('Read-only while impersonating a user.'); }
+
+if (READ_ONLY) {
+  const style = document.createElement('style');
+  style.textContent =
+    '.rl-ro-banner{position:sticky;top:0;z-index:120;background:#3a2d05;' +
+    'color:#fbbf24;border-bottom:1px solid #6b5409;padding:8px 16px;' +
+    'font-size:13px;font-weight:600}' +
+    '.rl-ro .chip[data-add]{opacity:.45;cursor:not-allowed}' +
+    '.rl-ro .q-actions button:disabled{opacity:.35;cursor:not-allowed}' +
+    '.rl-ro .danger-zone{display:none}' +
+    '.rl-ro #save-btn,.rl-ro #unsaved-tag,.rl-ro #add-page{display:none}';
+  document.head.appendChild(style);
+  document.documentElement.classList.add('rl-ro');
+  const banner = document.createElement('div');
+  banner.className = 'rl-ro-banner';
+  banner.textContent = 'Read-only — impersonating a user. Browse freely; changes are disabled.';
+  document.body.prepend(banner);
+}
+
+// Disable every field in a rendered chunk of read-only UI. Text-ish inputs
+// use readOnly (still focusable/copyable); checkboxes, radios, selects, and
+// buttons are disabled outright. Idempotent — call after every re-render.
+function lockReadOnlyFields(root) {
+  if (!READ_ONLY || !root) return;
+  root.querySelectorAll('input, textarea, select, button').forEach(el => {
+    if (el.tagName === 'TEXTAREA' || ['text', 'url', 'number', 'email'].includes(el.type)) {
+      el.readOnly = true;
+    } else {
+      el.disabled = true;
+    }
+  });
+}
+
 let state = null;
 let selectedQid = null;
 let selectedPid = null;
@@ -1186,14 +1236,23 @@ function defaultQuestion(kind) {
 
 async function load() {
   try {
-    const res = await fetch(BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/edit', { credentials: 'include' });
-    if (res.status === 401) { location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname); return; }
+    const res = await fetch(BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/edit', { credentials: apiCreds(), headers: apiHeaders() });
+    if (res.status === 401) {
+      if (READ_ONLY) {
+        document.getElementById('canvas').innerHTML = '<div class="empty-page">This read-only view expired. Reopen it from the plugin panel in the RoleLogic dashboard.</div>';
+        return;
+      }
+      location.href = ORIGIN + '/auth/login?return_to=' + encodeURIComponent(location.pathname);
+      return;
+    }
     state = await res.json();
     if (!state.schema || !state.schema.pages) state.schema = { title: state.title, pages: [{id: rid('p'), title: 'Page 1', questions: []}] };
-    document.getElementById('title-input').value = state.title || '';
-    document.getElementById('back-btn').href = BASE + '/admin/' + GUILD;
+    const titleInput = document.getElementById('title-input');
+    titleInput.value = state.title || '';
+    titleInput.readOnly = READ_ONLY;
+    document.getElementById('back-btn').href = BASE + '/admin/' + GUILD + RO_QS;
     document.getElementById('preview-btn').href = BASE + '/f/' + state.slug + '/preview?token=' + encodeURIComponent(state.preview_token);
-    document.getElementById('responses-btn').href = BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses';
+    document.getElementById('responses-btn').href = BASE + '/admin/' + GUILD + '/forms/' + FORM_ID + '/responses' + RO_QS;
     updateFormUrl();
     fillSettingsModal();
     refreshDangerZone();
@@ -1203,6 +1262,9 @@ async function load() {
 
 function fillSettingsModal() {
   const s = state.schema.settings || {};
+  // Re-lock after every fill: refreshQuizExtras/refreshRetryControls below
+  // re-enable individual fields based on quiz/submission state, so the
+  // read-only sweep must run last (see the end of this function).
   document.getElementById('s-submit-label').value = s.submit_label || 'Submit';
   document.getElementById('s-progress').checked = s.show_progress_bar !== false;
   document.getElementById('s-quiz').checked = !!state.is_quiz;
@@ -1226,6 +1288,7 @@ function fillSettingsModal() {
   document.querySelectorAll('input[name="s-retry-policy"]').forEach(r => { r.checked = (r.value === policy); });
   document.getElementById('s-lock-on-pass').checked = state.lock_on_pass !== false;
   refreshQuizExtras();
+  lockReadOnlyFields(document.querySelector('#settings-modal .modal-body'));
 }
 
 // Split a seconds count into the largest whole unit (days > hours > minutes)
@@ -1316,6 +1379,9 @@ function refreshRetryControls() {
 }
 
 function readSettingsModal() {
+  // Read-only: never copy modal fields back into state — the modal is a
+  // viewer (all fields are locked; this guard covers any that aren't).
+  if (READ_ONLY) return;
   if (!state.schema.settings) state.schema.settings = {};
   const s = state.schema.settings;
   const snap = () => JSON.stringify([
@@ -1357,6 +1423,8 @@ function readSettingsModal() {
 }
 
 function markDirty() {
+  // Backstop: read-only views never enter the dirty/save flow.
+  if (READ_ONLY) return;
   dirty = true;
   const btn = document.getElementById('save-btn');
   btn.textContent = 'Save changes';
@@ -1395,8 +1463,8 @@ function render() {
     const pageEl = document.createElement('div');
     pageEl.className = 'page' + (selectedPid === page.id ? ' page-selected' : '');
     pageEl.dataset.pid = page.id;
-    let header = `<div class="page-title">PAGE ${pi+1}<input data-page-title="${escapeHtml(page.id)}" value="${escapeHtml(page.title)}" aria-label="Page ${pi+1} title">`;
-    if (state.schema.pages.length > 1) {
+    let header = `<div class="page-title">PAGE ${pi+1}<input data-page-title="${escapeHtml(page.id)}" value="${escapeHtml(page.title)}" aria-label="Page ${pi+1} title"${READ_ONLY ? ' readonly' : ''}>`;
+    if (state.schema.pages.length > 1 && !READ_ONLY) {
       header += `<button class="btn-page-del" data-del-page="${escapeHtml(page.id)}">Delete page</button>`;
     }
     header += `</div>`;
@@ -1419,7 +1487,9 @@ function render() {
 function renderQuestion(q, pageId) {
   const wrap = document.createElement('div');
   wrap.className = 'q-card' + (selectedQid === q.id ? ' selected' : '');
-  wrap.draggable = true;
+  // Selecting a card to view its inspector stays available in read-only
+  // mode; reordering (drag) does not.
+  wrap.draggable = !READ_ONLY;
   wrap.dataset.qid = q.id;
   wrap.dataset.pid = pageId;
   const kindLabel = q.kind.replace(/_/g, ' ');
@@ -1438,17 +1508,29 @@ function renderQuestion(q, pageId) {
     </div>
     <div class="q-pre">${describeQuestion(q)}</div>
   `;
+  if (READ_ONLY) {
+    const titleInput = wrap.querySelector('.q-title');
+    if (titleInput) titleInput.readOnly = true;
+    wrap.querySelectorAll('.q-actions button').forEach(b => {
+      b.disabled = true;
+      b.title = 'Read-only while impersonating a user';
+    });
+  }
   wrap.addEventListener('click', e => {
     if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.closest('button')) return;
     selectQ(q.id);
     if (window.matchMedia('(max-width: 900px)').matches) toggleInspector(true);
   });
-  wrap.addEventListener('dragstart', e => { dragQid = q.id; e.dataTransfer.effectAllowed = 'move'; });
+  wrap.addEventListener('dragstart', e => {
+    if (READ_ONLY) { e.preventDefault(); return; }
+    dragQid = q.id; e.dataTransfer.effectAllowed = 'move';
+  });
   wrap.addEventListener('dragover', e => { e.preventDefault(); wrap.classList.add('dragover'); });
   wrap.addEventListener('dragleave', () => wrap.classList.remove('dragover'));
   wrap.addEventListener('drop', e => {
     e.preventDefault();
     wrap.classList.remove('dragover');
+    if (READ_ONLY) return;
     if (!dragQid || dragQid === q.id) return;
     moveQuestion(dragQid, pageId, q.id);
     dragQid = null;
@@ -1511,6 +1593,7 @@ function selectQ(qid) {
       <input type="text" data-i="title" value="${escapeHtml(q.title || '')}" placeholder="Shown below the image">
       <p class="muted" style="margin-top:14px;line-height:1.55;">Paste a direct image URL (jpg, png, gif, webp). Hotlinking is allowed but some hosts (Discord CDN, Imgur) may block embeds — test with the Preview button.</p>
     `;
+    lockReadOnlyFields(document.getElementById('inspector-body'));
     return;
   }
 
@@ -1529,6 +1612,7 @@ function selectQ(qid) {
       <input type="text" data-i="title" value="${escapeHtml(q.title || '')}" placeholder="Shown below the video">
       <p class="muted" style="margin-top:14px;line-height:1.55;">Paste a YouTube URL (youtube.com/watch?v=… or youtu.be/…) or a direct video file URL (mp4, webm). YouTube links embed as an iframe; direct files use the browser native player.</p>
     `;
+    lockReadOnlyFields(document.getElementById('inspector-body'));
     return;
   }
 
@@ -1589,9 +1673,11 @@ function selectQ(qid) {
     h += `</div>`;
   }
   document.getElementById('inspector-body').innerHTML = h;
+  lockReadOnlyFields(document.getElementById('inspector-body'));
 }
 
 document.getElementById('inspector').addEventListener('input', e => {
+  if (READ_ONLY) return;
   if (!selectedQid) return;
   const [, q] = findQuestion(selectedQid);
   if (!q) return;
@@ -1628,6 +1714,7 @@ document.getElementById('inspector').addEventListener('input', e => {
 });
 
 document.getElementById('inspector').addEventListener('click', e => {
+  if (READ_ONLY) return;
   const [, q] = findQuestion(selectedQid);
   if (!q) return;
   // Mark / unmark a correct option (quiz mode). Clicking the box stores the
@@ -1668,6 +1755,7 @@ document.getElementById('inspector').addEventListener('click', e => {
 });
 
 document.getElementById('canvas').addEventListener('input', e => {
+  if (READ_ONLY) return;
   const t = e.target;
   if (t.dataset.pageTitle) {
     const p = state.schema.pages.find(p => p.id === t.dataset.pageTitle);
@@ -1680,6 +1768,10 @@ document.getElementById('canvas').addEventListener('input', e => {
 
 document.getElementById('canvas').addEventListener('click', e => {
   const t = e.target.closest('button') || e.target;
+  if (READ_ONLY && t.dataset && (t.dataset.del || t.dataset.dup || t.dataset.delPage)) {
+    roBlocked();
+    return;
+  }
   if (t.dataset && t.dataset.del) {
     const qid = t.dataset.del;
     for (const p of state.schema.pages) {
@@ -1711,6 +1803,7 @@ document.getElementById('canvas').addEventListener('click', e => {
 });
 
 document.querySelectorAll('.chip[data-add]').forEach(el => el.onclick = () => {
+  if (READ_ONLY) { roBlocked(); return; }
   const kind = el.dataset.add;
   const q = defaultQuestion(kind);
   let target = null;
@@ -1733,6 +1826,7 @@ document.querySelectorAll('.chip[data-add]').forEach(el => el.onclick = () => {
 });
 
 document.getElementById('add-page').onclick = () => {
+  if (READ_ONLY) { roBlocked(); return; }
   const newPage = { id: rid('p'), title: 'Page ' + (state.schema.pages.length + 1), questions: [] };
   state.schema.pages.push(newPage);
   selectedPid = newPage.id;
@@ -1741,6 +1835,7 @@ document.getElementById('add-page').onclick = () => {
 };
 
 function moveQuestion(qid, toPageId, beforeQid) {
+  if (READ_ONLY) return;
   let src = null;
   for (const p of state.schema.pages) {
     const i = p.questions.findIndex(q => q.id === qid);
@@ -1754,7 +1849,10 @@ function moveQuestion(qid, toPageId, beforeQid) {
   render(); markDirty();
 }
 
-document.getElementById('title-input').addEventListener('input', e => { state.title = e.target.value; markDirty(); });
+document.getElementById('title-input').addEventListener('input', e => {
+  if (READ_ONLY) return;
+  state.title = e.target.value; markDirty();
+});
 
 document.getElementById('settings-btn').onclick = () => document.getElementById('settings-modal').classList.add('active');
 // Live-toggle the passing-score input + the (now redundant) edit/single-submit
@@ -1815,6 +1913,9 @@ window.addEventListener('keydown', e => {
 });
 
 async function save() {
+  // Read-only (impersonation) sessions can't save; the server enforces this
+  // too — the PUT would be rejected before reaching the handler.
+  if (READ_ONLY) { roBlocked(); return; }
   state.schema.title = state.title;
   const body = {
     title: state.title || 'Untitled form',
@@ -1942,6 +2043,7 @@ function refreshDangerZone() {
 }
 
 document.getElementById('delete-form-btn').onclick = () => {
+  if (READ_ONLY) { roBlocked(); return; }
   if (!state) return;
   const title = state.title || 'Untitled form';
   document.getElementById('del-title-name').textContent = title;
@@ -1979,6 +2081,7 @@ document.getElementById('delete-modal-bg').onclick = e => {
 };
 
 document.getElementById('del-confirm-btn').onclick = async () => {
+  if (READ_ONLY) return;
   const btn = document.getElementById('del-confirm-btn');
   btn.disabled = true;
   btn.textContent = 'Deleting…';

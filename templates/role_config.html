@@ -661,30 +661,40 @@ function apiHeaders(extra) {
 function apiCreds() { return IS_EMBEDDED ? 'omit' : 'include'; }
 
 // Read-only mode: set when a RoleLogic developer is viewing this config while
-// impersonating the user. The server (admin.rs) is the real guard — it rejects
-// the save XHR — but we also lock the UI so it's clearly view-only.
+// impersonating the user. The server is the real guard — it rejects every
+// write (admin.rs + the read_only_guard middleware) — so the UI stays fully
+// browsable for debugging: dropdowns open, links work, values are inspectable.
+// Only the *mutating* affordances are inert (disabled controls, snapped-back
+// selects, hidden savebar). Never re-add a blanket pointer-events lock here —
+// it makes the page useless as a debugging view.
 const READ_ONLY = '__READ_ONLY__' === '1';
+// Sub-pages (forms list, builder, responses) can't use the developer's
+// cookies, so in read-only mode every link to them carries the read-only
+// session as `?ifs=…`; those pages then render in the same read-only mode.
+const RO_QS = READ_ONLY && IFRAME_TOKEN ? '?ifs=' + encodeURIComponent(IFRAME_TOKEN) : '';
 if (READ_ONLY) {
   document.documentElement.classList.add('rl-read-only');
   const style = document.createElement('style');
   style.textContent =
-    '.rl-read-only #content{pointer-events:none;opacity:.85}' +
     '.rl-read-only #savebar{display:none !important}' +
+    '.rl-read-only .btn-icon:disabled,.rl-read-only #add-cond:disabled{opacity:.4;cursor:not-allowed}' +
+    '.rl-read-only input[readonly]{opacity:.85}' +
     '.rl-ro-banner{position:sticky;top:0;z-index:50;background:#3a2d05;' +
     'color:#fbbf24;border-bottom:1px solid #6b5409;padding:8px 16px;' +
     'font-size:13px;font-weight:600}';
   document.head.appendChild(style);
   const banner = document.createElement('div');
   banner.className = 'rl-ro-banner';
-  banner.textContent = 'Read-only — impersonating a user. Changes are disabled.';
+  banner.textContent = 'Read-only — impersonating a user. Browse freely; changes are disabled.';
   document.body.prepend(banner);
 }
+function roBlocked() { showToast('Read-only while impersonating a user.', 'error'); }
 
-document.getElementById('back-link').href = BASE + '/admin/' + GUILD;
+document.getElementById('back-link').href = BASE + '/admin/' + GUILD + RO_QS;
 document.getElementById('rid-tag').textContent = ROLE;
 // "Create a form" CTA opens the per-guild admin page where the New-form
 // modal lives. Target=_blank so we don't navigate the iframe away.
-document.getElementById('create-form-link').href = BASE + '/admin/' + GUILD;
+document.getElementById('create-form-link').href = BASE + '/admin/' + GUILD + RO_QS;
 
 // When embedded, hide breadcrumbs / external links — the dashboard owns
 // navigation, and those would navigate the iframe away from this view.
@@ -938,6 +948,9 @@ function renderFormPicker() {
   });
   sel.innerHTML = html;
   sel.onchange = () => {
+    // Read-only: the dropdown stays openable (seeing which forms exist is
+    // half the point of a debugging view) but a pick snaps back.
+    if (READ_ONLY) { sel.value = state.config.form_id || ''; roBlocked(); return; }
     state.config.form_id = sel.value;
     // Existing conditions may reference questions that no longer exist on
     // the new form — keep them around (the back-end will refuse to save),
@@ -951,16 +964,16 @@ function renderFormPicker() {
 function renderFormLinks() {
   // "Manage forms ↗" — always points to the per-guild forms list.
   const manage = document.getElementById('manage-forms-link');
-  manage.href = BASE + '/admin/' + GUILD;
+  manage.href = BASE + '/admin/' + GUILD + RO_QS;
 
   // "Edit form ↗" / "View responses ↗" — only meaningful when a form is bound.
   const fid = state.config.form_id;
   const editLink = document.getElementById('edit-form-link');
   const respLink = document.getElementById('responses-link');
   if (fid) {
-    editLink.href = BASE + '/admin/' + GUILD + '/forms/' + encodeURIComponent(fid);
+    editLink.href = BASE + '/admin/' + GUILD + '/forms/' + encodeURIComponent(fid) + RO_QS;
     editLink.style.display = 'inline-flex';
-    respLink.href = BASE + '/admin/' + GUILD + '/forms/' + encodeURIComponent(fid) + '/responses';
+    respLink.href = BASE + '/admin/' + GUILD + '/forms/' + encodeURIComponent(fid) + '/responses' + RO_QS;
     respLink.style.display = 'inline-flex';
   } else {
     editLink.style.display = 'none';
@@ -1002,8 +1015,13 @@ function renderModeRadios() {
   document.querySelectorAll('.radio-opt[data-mode]').forEach(el => {
     const me = el.dataset.mode;
     el.classList.toggle('selected', me === mode);
-    el.querySelector('input').checked = (me === mode);
+    const input = el.querySelector('input');
+    input.checked = (me === mode);
+    // Disabled input = the label click can't toggle it; our handler still
+    // fires so the read-only nudge explains why nothing happened.
+    input.disabled = READ_ONLY;
     el.onclick = () => {
+      if (READ_ONLY) { roBlocked(); return; }
       state.config.mode = me;
       markDirty();
       render();
@@ -1030,13 +1048,15 @@ function renderConditions() {
   });
 
   const addBtn = document.getElementById('add-cond');
-  addBtn.disabled = !form || conds.length >= state.max_conditions;
+  addBtn.disabled = READ_ONLY || !form || conds.length >= state.max_conditions;
+  addBtn.title = READ_ONLY ? 'Read-only while impersonating a user' : '';
   if (conds.length >= state.max_conditions) {
     addBtn.innerHTML = `Max ${state.max_conditions} conditions reached`;
   } else {
     addBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add condition`;
   }
   addBtn.onclick = () => {
+    if (READ_ONLY) { roBlocked(); return; }
     if (!form) return;
     // For quizzes, gating on total_score is the common case — make it the
     // default so admins don't have to flip the picker every time. Falls
@@ -1089,6 +1109,7 @@ function renderCondRow(form, cond, idx) {
   }
   targetSel.innerHTML = tHtml;
   targetSel.onchange = () => {
+    if (READ_ONLY) { targetSel.value = cond.target; roBlocked(); return; }
     cond.target = targetSel.value;
     const newQ = questionById(form, cond.target);
     const newKind = newQ ? newQ.kind : '__quiz_total_score__';
@@ -1116,6 +1137,7 @@ function renderCondRow(form, cond, idx) {
   }
   opSel.innerHTML = oHtml;
   opSel.onchange = () => {
+    if (READ_ONLY) { opSel.value = cond.operator; roBlocked(); return; }
     cond.operator = opSel.value;
     cond.value = defaultValueFor(cond.operator, question);
     cond.value_end = null;
@@ -1136,9 +1158,11 @@ function renderCondRow(form, cond, idx) {
   rm.className = 'btn-icon';
   rm.type = 'button';
   rm.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-  rm.title = 'Remove this condition';
+  rm.title = READ_ONLY ? 'Read-only while impersonating a user' : 'Remove this condition';
   rm.setAttribute('aria-label', 'Remove condition');
+  rm.disabled = READ_ONLY;
   rm.onclick = () => {
+    if (READ_ONLY) { roBlocked(); return; }
     state.config.conditions.splice(idx, 1);
     markDirty();
     render();
@@ -1159,11 +1183,15 @@ function renderCondRow(form, cond, idx) {
 
 function buildValueWidget(box, widget, cond, question) {
   box.innerHTML = '';
+  // Read-only treatment per widget: text-ish inputs become readOnly (still
+  // focusable, selectable, copyable), pickers stay openable but snap back,
+  // checkboxes are disabled (their checked state is the information).
   if (widget === 'text') {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = typeof cond.value === 'string' ? cond.value : '';
     inp.placeholder = cond.operator === 'regex' ? 'e.g. ^[A-Z]+$' : 'value';
+    inp.readOnly = READ_ONLY;
     inp.oninput = () => { cond.value = inp.value; markDirty(); };
     box.appendChild(inp);
     return;
@@ -1172,6 +1200,7 @@ function buildValueWidget(box, widget, cond, question) {
     const inp = document.createElement('input');
     inp.type = 'number';
     inp.value = (cond.value ?? '');
+    inp.readOnly = READ_ONLY;
     inp.oninput = () => { cond.value = inp.value; markDirty(); };
     box.appendChild(inp);
     return;
@@ -1182,6 +1211,8 @@ function buildValueWidget(box, widget, cond, question) {
     const a = document.createElement('input'); a.type = 'number'; a.placeholder = 'min'; a.value = cond.value ?? '';
     const sep = document.createElement('div'); sep.className = 'sep'; sep.textContent = '–';
     const b = document.createElement('input'); b.type = 'number'; b.placeholder = 'max'; b.value = cond.value_end ?? '';
+    a.readOnly = READ_ONLY;
+    b.readOnly = READ_ONLY;
     a.oninput = () => { cond.value = a.value; markDirty(); };
     b.oninput = () => { cond.value_end = b.value; markDirty(); };
     wrap.appendChild(a); wrap.appendChild(sep); wrap.appendChild(b);
@@ -1192,6 +1223,8 @@ function buildValueWidget(box, widget, cond, question) {
     const inp = document.createElement('input');
     inp.type = 'date';
     inp.value = typeof cond.value === 'string' ? cond.value : '';
+    // Date inputs don't honor readOnly consistently across browsers.
+    inp.disabled = READ_ONLY;
     inp.oninput = () => { cond.value = inp.value; markDirty(); };
     box.appendChild(inp);
     return;
@@ -1204,7 +1237,10 @@ function buildValueWidget(box, widget, cond, question) {
       html += `<option value="${escapeHtml(o.id)}" ${cond.value === o.id ? 'selected' : ''}>${escapeHtml(o.label)}</option>`;
     });
     sel.innerHTML = html;
-    sel.onchange = () => { cond.value = sel.value; markDirty(); };
+    sel.onchange = () => {
+      if (READ_ONLY) { sel.value = typeof cond.value === 'string' ? cond.value : ''; roBlocked(); return; }
+      cond.value = sel.value; markDirty();
+    };
     box.appendChild(sel);
     return;
   }
@@ -1224,6 +1260,7 @@ function buildValueWidget(box, widget, cond, question) {
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = current.includes(o.id);
+        cb.disabled = READ_ONLY;
         cb.onchange = () => {
           if (cb.checked) {
             if (!current.includes(o.id)) current.push(o.id);
@@ -1248,6 +1285,7 @@ function buildValueWidget(box, widget, cond, question) {
     const arr = Array.isArray(cond.value) ? cond.value : [];
     inp.value = arr.join(', ');
     inp.placeholder = 'comma-separated values';
+    inp.readOnly = READ_ONLY;
     inp.oninput = () => {
       cond.value = inp.value.split(',').map(s => s.trim()).filter(Boolean);
       markDirty();
@@ -1262,6 +1300,10 @@ function buildValueWidget(box, widget, cond, question) {
 }
 
 function markDirty() {
+  // Backstop: read-only views never enter the dirty/save flow (and never
+  // post rl:dirty, which would make the dashboard prompt about "unsaved
+  // changes" that can't exist).
+  if (READ_ONLY) return;
   const was = dirty;
   dirty = true;
   renderStatus();
