@@ -1747,48 +1747,50 @@ pub async fn role_config_data(
 
     let forms: Vec<Value> = form_rows
         .into_iter()
-        .map(|(id, title, is_quiz, archived, passing_score, schema_json)| {
-            let parsed: Option<FormSchema> = serde_json::from_value(schema_json).ok();
-            let questions: Vec<Value> = parsed
-                .as_ref()
-                .map(|s| {
-                    s.iter_questions()
-                        .filter(|q| q.kind.is_conditionable())
-                        .map(|q| {
-                            let options: Vec<Value> = q
-                                .options
-                                .as_ref()
-                                .map(|opts| {
-                                    opts.iter()
-                                        .map(|o| json!({ "id": o.id, "label": o.label }))
-                                        .collect()
+        .map(
+            |(id, title, is_quiz, archived, passing_score, schema_json)| {
+                let parsed: Option<FormSchema> = serde_json::from_value(schema_json).ok();
+                let questions: Vec<Value> = parsed
+                    .as_ref()
+                    .map(|s| {
+                        s.iter_questions()
+                            .filter(|q| q.kind.is_conditionable())
+                            .map(|q| {
+                                let options: Vec<Value> = q
+                                    .options
+                                    .as_ref()
+                                    .map(|opts| {
+                                        opts.iter()
+                                            .map(|o| json!({ "id": o.id, "label": o.label }))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                json!({
+                                    "id": q.id,
+                                    "title": q.title,
+                                    "kind": q.kind.as_str(),
+                                    "is_array_valued": q.kind.is_array_valued(),
+                                    "options": options,
                                 })
-                                .unwrap_or_default();
-                            json!({
-                                "id": q.id,
-                                "title": q.title,
-                                "kind": q.kind.as_str(),
-                                "is_array_valued": q.kind.is_array_valued(),
-                                "options": options,
                             })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-            json!({
-                "id": id.to_string(),
-                "title": title,
-                "is_quiz": is_quiz,
-                "archived": archived,
-                // The quiz's own pass threshold (pass = score >= passing_score).
-                // The rule builder uses it to flag conditions that disagree
-                // with what respondents are told (e.g. "> mark" silently
-                // excluding members who scored exactly the pass mark).
-                "passing_score": passing_score,
-                "questions": questions,
-            })
-        })
+                json!({
+                    "id": id.to_string(),
+                    "title": title,
+                    "is_quiz": is_quiz,
+                    "archived": archived,
+                    // The quiz's own pass threshold (pass = score >= passing_score).
+                    // The rule builder uses it to flag conditions that disagree
+                    // with what respondents are told (e.g. "> mark" silently
+                    // excluding members who scored exactly the pass mark).
+                    "passing_score": passing_score,
+                    "questions": questions,
+                })
+            },
+        )
         .collect();
 
     // Treat a brand-new role-link (grant_on_any_submission=false AND no
