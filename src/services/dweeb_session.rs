@@ -29,8 +29,13 @@ use super::rl_token::constant_time_eq;
 type HmacSha256 = Hmac<Sha256>;
 
 const DWEEB_PREFIX: &str = "dws:";
-/// Read-only form-list access; the bridge re-mints instantly, so keep it short.
-const DWEEB_TTL_SECS: i64 = 30 * 60;
+/// Read-only, guild-bound form-*name* listing is all this grants, so the TTL
+/// optimizes for UX over rotation: the picker persists the token in its
+/// (partitioned) storage so an admin signs in about once a day per server
+/// rather than on every Configure open. Manager-permission revocation within
+/// the window only exposes form titles/slugs — the same names any member sees
+/// on the public form pages — never responses or config.
+const DWEEB_TTL_SECS: i64 = 12 * 60 * 60;
 
 pub struct DweebSession {
     pub discord_id: String,

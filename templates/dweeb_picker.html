@@ -50,6 +50,7 @@ a { color: #a78bfa; }
 <!-- State: connected, needs sign-in -->
 <div id="signin" class="card hidden">
   <p>Sign in with Discord to list the forms of <strong id="guildName1">this server</strong>. You'll need <strong>Manage Server</strong> permission.</p>
+  <p class="note">Quick if you're already signed in to RoleLogic — the window closes itself. You'll only see this about once a day.</p>
   <div class="row" style="margin-top:10px">
     <button class="btn" id="signinBtn" type="button">Sign in with Discord</button>
     <button class="btn ghost hidden" id="retryBtn" type="button">I signed in — continue</button>
@@ -107,6 +108,35 @@ a { color: #a78bfa; }
 
   var $ = function (id) { return document.getElementById(id); };
 
+  // --- session persistence ---------------------------------------------------
+  // The dws session is remembered in this iframe's (partitioned) storage so
+  // reopening the picker within the token's lifetime skips the sign-in popup
+  // entirely — the admin authenticates about once a day per server, not per
+  // open. Format: dws:{discord}:{guild}:{exp}:{sig}; the exp field lets us
+  // discard a stale token without a round-trip, and the guild field keeps a
+  // token from one server ever being offered for another.
+  function sessionKey(guildId) { return 'rl-dweeb-session:' + guildId; }
+
+  function loadStoredToken(guildId) {
+    try {
+      var t = localStorage.getItem(sessionKey(guildId));
+      if (!t || t.indexOf('dws:') !== 0) return null;
+      var parts = t.split(':');
+      if (parts.length !== 5 || parts[2] !== guildId) return null;
+      var exp = parseInt(parts[3], 10);
+      if (!isFinite(exp) || exp * 1000 < Date.now() + 60000) return null;
+      return t;
+    } catch (e) { return null; }
+  }
+
+  function storeToken(guildId, t) {
+    try { localStorage.setItem(sessionKey(guildId), t); } catch (e) {}
+  }
+
+  function clearStoredToken(guildId) {
+    try { localStorage.removeItem(sessionKey(guildId)); } catch (e) {}
+  }
+
   function postToHost(msg) {
     try { parent.postMessage(msg, hostOrigin); } catch (e) {}
   }
@@ -134,6 +164,7 @@ a { color: #a78bfa; }
     if (m.type === 'rl-dweeb:session' && e.origin === OWN_ORIGIN) {
       if (typeof m.token === 'string' && guild && m.guildId === guild.id) {
         token = m.token;
+        storeToken(guild.id, token);
         showPickState();
         loadForms();
       }
@@ -181,6 +212,8 @@ a { color: #a78bfa; }
     $('guildName1').textContent = guild.name || 'this server';
     $('guildName2').textContent = guild.name || 'your server';
     $('builderLink').href = BASE_URL + '/admin/' + guild.id;
+    // A session from a previous open skips the sign-in card entirely.
+    if (!token) token = loadStoredToken(guild.id);
     if (token) { showPickState(); loadForms(); }
     else show('signin', true);
     updateSave();
@@ -218,7 +251,13 @@ a { color: #a78bfa; }
       cache: 'no-store',
     })
       .then(function (r) {
-        if (r.status === 401) { token = null; show('pick', false); show('signin', true); throw new Error('expired'); }
+        if (r.status === 401) {
+          token = null;
+          if (guild) clearStoredToken(guild.id);
+          show('pick', false);
+          show('signin', true);
+          throw new Error('expired');
+        }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
