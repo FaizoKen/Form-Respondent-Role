@@ -205,6 +205,11 @@ async fn main() {
             "/admin/{guild_id}/role/{role_id}/data",
             get(routes::admin::role_config_data),
         )
+        // DWEEB editor integration (link-plugin status probe + form picker)
+        .route("/dweeb/status", get(routes::dweeb::status))
+        .route("/dweeb/picker", get(routes::dweeb::picker_page))
+        .route("/dweeb/bridge", get(routes::dweeb::bridge))
+        .route("/dweeb/forms", get(routes::dweeb::forms))
         // Optional public respondent list
         .route("/respondents/{guild_id}", get(routes::respondents::page))
         .route(

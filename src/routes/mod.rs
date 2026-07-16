@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod dweeb;
 pub mod form_render;
 pub mod health;
 pub mod plugin;

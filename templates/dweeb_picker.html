@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pick a form — RoleLogic</title>
+<link rel="icon" href="__BASE_URL__/favicon.ico" type="image/x-icon">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #0e1525; color: #d8dde6; padding: 16px; }
+h1 { color: #a78bfa; font-size: 16px; margin-bottom: 4px; }
+p { color: #94a3b8; line-height: 1.5; font-size: 13px; margin: 8px 0; }
+.card { background: #161d2e; padding: 16px; border-radius: 10px; border: 1px solid #1e2a3d; margin: 12px 0; }
+.btn { display: inline-block; padding: 9px 16px; background: #5865f2; color: #fff; border: 0; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; text-decoration: none; }
+.btn:hover { background: #4752c4; }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.btn.ghost { background: transparent; color: #cbd5e1; border: 1px solid #2a3548; font-weight: 500; }
+.btn.ghost:hover { background: #1e293b; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.forms { list-style: none; margin: 8px 0; max-height: 300px; overflow-y: auto; }
+.forms li { border: 1px solid #1e2a3d; border-radius: 8px; margin: 6px 0; }
+.forms label { display: flex; gap: 10px; align-items: center; padding: 10px 12px; cursor: pointer; }
+.forms li.sel { border-color: #a78bfa; background: #17142b; }
+.forms .t { font-size: 14px; color: #e2e8f0; }
+.forms .m { font-size: 12px; color: #64748b; }
+input[type="url"], input[type="text"] { width: 100%; padding: 9px 10px; background: #0b1120; color: #e2e8f0; border: 1px solid #2a3548; border-radius: 8px; font-size: 13px; }
+.err { color: #fca5a5; font-size: 13px; margin: 8px 0; }
+.note { color: #64748b; font-size: 12px; }
+details { margin-top: 12px; }
+summary { color: #94a3b8; font-size: 13px; cursor: pointer; }
+.footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 14px; }
+.hidden { display: none !important; }
+a { color: #a78bfa; }
+.spin { color: #94a3b8; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Form Respondent Role</h1>
+<p>Point this button at one of your server's RoleLogic forms. Members who open it can fill the form in; answers, score or a simple submission grant the matching role.</p>
+
+<!-- State: waiting on the DWEEB handshake -->
+<div id="boot" class="card"><p class="spin">Connecting to the editor…</p></div>
+
+<!-- State: no connected server -->
+<div id="noguild" class="card hidden">
+  <p>DWEEB isn't connected to a server yet, so your forms can't be listed here.</p>
+  <p class="note">Connect a server in DWEEB (sign in and pick it in the editor), reopen this configuration — or paste a form link below.</p>
+</div>
+
+<!-- State: connected, needs sign-in -->
+<div id="signin" class="card hidden">
+  <p>Sign in with Discord to list the forms of <strong id="guildName1">this server</strong>. You'll need <strong>Manage Server</strong> permission.</p>
+  <div class="row" style="margin-top:10px">
+    <button class="btn" id="signinBtn" type="button">Sign in with Discord</button>
+    <button class="btn ghost hidden" id="retryBtn" type="button">I signed in — continue</button>
+  </div>
+  <p class="err hidden" id="popupErr">Your browser blocked the sign-in popup — allow popups for this page, or paste a form link below instead.</p>
+</div>
+
+<!-- State: signed in, list forms -->
+<div id="pick" class="card hidden">
+  <div class="row" style="justify-content:space-between">
+    <p style="margin:0">Forms in <strong id="guildName2">your server</strong></p>
+    <button class="btn ghost" id="refreshBtn" type="button" title="Refresh the list">↻ Refresh</button>
+  </div>
+  <ul class="forms" id="formList"></ul>
+  <p class="note hidden" id="noForms">No forms yet. Create one on the RoleLogic dashboard, then hit ↻ Refresh.</p>
+  <p><a id="builderLink" href="#" target="_blank" rel="noopener">Open the form builder ↗</a> <span class="note">— create or edit forms, then refresh.</span></p>
+  <p class="err hidden" id="listErr"></p>
+</div>
+
+<!-- Always available: paste fallback -->
+<details id="pasteBox">
+  <summary>…or paste a form link</summary>
+  <div class="card">
+    <p class="note">Paste the form's share link from the RoleLogic dashboard (it looks like <code>__BASE_URL__/f/xxxxxxxx</code>).</p>
+    <input type="url" id="pasteInput" placeholder="__BASE_URL__/f/…" style="margin-top:8px">
+    <p class="err hidden" id="pasteErr"></p>
+  </div>
+</details>
+
+<div class="footer">
+  <button class="btn ghost" id="cancelBtn" type="button">Cancel</button>
+  <button class="btn" id="saveBtn" type="button" disabled>Use this form</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE_URL = '__BASE_URL__';
+  var OWN_ORIGIN = new URL(BASE_URL).origin;
+  var FORM_URL_PREFIX = BASE_URL + '/f/';
+  var SLUG_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+  var nonce = null;
+  var hostOrigin = '*';
+  var apiVersion = 1;
+  var guild = null;        // { id, name } | null once resolved
+  var guildKnown = false;  // whether the guild response arrived
+  var token = null;        // dws:… picker session
+  var forms = [];
+  var selectedSlug = null; // slug picked from the list
+  var pastedSlug = null;   // slug parsed from the paste box
+  var popupRef = null;
+  var pendingRequests = {};
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function postToHost(msg) {
+    try { parent.postMessage(msg, hostOrigin); } catch (e) {}
+  }
+
+  // --- auto-resize -----------------------------------------------------------
+  function postHeight() {
+    if (!nonce) return;
+    var h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    postToHost({ type: 'dweeb:plugin:resize', nonce: nonce, height: h });
+  }
+  if ('ResizeObserver' in window) new ResizeObserver(postHeight).observe(document.body);
+
+  // --- DWEEB handshake -------------------------------------------------------
+  function requestResource(resource, cb) {
+    var requestId = String(Date.now()) + Math.random().toString(36).slice(2);
+    pendingRequests[requestId] = cb;
+    postToHost({ type: 'dweeb:plugin:request', nonce: nonce, requestId: requestId, resource: resource });
+  }
+
+  window.addEventListener('message', function (e) {
+    var m = e.data;
+    if (!m || typeof m !== 'object') return;
+
+    // Session token handed back by our own /dweeb/bridge popup (same origin).
+    if (m.type === 'rl-dweeb:session' && e.origin === OWN_ORIGIN) {
+      if (typeof m.token === 'string' && guild && m.guildId === guild.id) {
+        token = m.token;
+        showPickState();
+        loadForms();
+      }
+      return;
+    }
+
+    if (m.type === 'dweeb:plugin:init') {
+      nonce = m.nonce;
+      hostOrigin = e.origin && e.origin !== 'null' ? e.origin : '*';
+      apiVersion = typeof m.apiVersion === 'number' ? m.apiVersion : 1;
+      // Pre-select the currently bound form when reconfiguring.
+      if (typeof m.linkUrl === 'string' && m.linkUrl.indexOf(FORM_URL_PREFIX) === 0) {
+        var s = m.linkUrl.slice(FORM_URL_PREFIX.length).split(/[?#]/)[0];
+        if (SLUG_RE.test(s)) selectedSlug = s;
+      }
+      requestResource('guild', function (ok, data) {
+        guildKnown = true;
+        guild = ok && data && typeof data.id === 'string' ? data : null;
+        renderEntryState();
+      });
+      postHeight();
+      return;
+    }
+
+    if (m.type === 'dweeb:plugin:response' && m.nonce === nonce) {
+      var cb = pendingRequests[m.requestId];
+      if (cb) { delete pendingRequests[m.requestId]; cb(!!m.ok, m.data); }
+      return;
+    }
+  });
+
+  parent.postMessage({ type: 'dweeb:plugin:ready', apiVersion: 1 }, '*');
+
+  // --- UI state machine ------------------------------------------------------
+  function show(id, on) { $(id).classList.toggle('hidden', !on); }
+
+  function renderEntryState() {
+    show('boot', false);
+    if (!guild) {
+      show('noguild', true);
+      $('pasteBox').open = true;
+      updateSave();
+      return;
+    }
+    $('guildName1').textContent = guild.name || 'this server';
+    $('guildName2').textContent = guild.name || 'your server';
+    $('builderLink').href = BASE_URL + '/admin/' + guild.id;
+    if (token) { showPickState(); loadForms(); }
+    else show('signin', true);
+    updateSave();
+  }
+
+  function showPickState() {
+    show('signin', false);
+    show('pick', true);
+  }
+
+  // --- sign-in popup ---------------------------------------------------------
+  function openBridge() {
+    if (!guild) return;
+    var url = BASE_URL + '/dweeb/bridge?guild=' + encodeURIComponent(guild.id);
+    // A features string keeps `opener` on the popup (unlike noopener), which
+    // the bridge needs for its postMessage handoff back to this iframe.
+    popupRef = window.open(url, 'rl-dweeb-auth', 'width=520,height=680');
+    if (!popupRef) { show('popupErr', true); $('pasteBox').open = true; }
+    else { show('popupErr', false); show('retryBtn', true); }
+  }
+  $('signinBtn').addEventListener('click', openBridge);
+  // Discord's OAuth hop can sever window.opener; a second popup goes straight
+  // to the bridge (cookie already set) and delivers the token instantly.
+  $('retryBtn').addEventListener('click', openBridge);
+
+  // --- forms list ------------------------------------------------------------
+  var listInFlight = false;
+  function loadForms() {
+    if (!guild || !token || listInFlight) return;
+    listInFlight = true;
+    $('listErr').classList.add('hidden');
+    fetch(BASE_URL + '/dweeb/forms?guild=' + encodeURIComponent(guild.id), {
+      headers: { Authorization: 'Bearer ' + token },
+      credentials: 'omit',
+      cache: 'no-store',
+    })
+      .then(function (r) {
+        if (r.status === 401) { token = null; show('pick', false); show('signin', true); throw new Error('expired'); }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        forms = Array.isArray(data.forms) ? data.forms : [];
+        renderForms();
+      })
+      .catch(function (e) {
+        if (e.message !== 'expired') {
+          $('listErr').textContent = 'Could not load your forms. Check your connection and hit ↻ Refresh.';
+          $('listErr').classList.remove('hidden');
+        }
+      })
+      .then(function () { listInFlight = false; });
+  }
+  $('refreshBtn').addEventListener('click', loadForms);
+
+  function renderForms() {
+    var ul = $('formList');
+    ul.textContent = '';
+    show('noForms', forms.length === 0);
+    forms.forEach(function (f) {
+      if (!SLUG_RE.test(String(f.slug || ''))) return;
+      var li = document.createElement('li');
+      var label = document.createElement('label');
+      var radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'form';
+      radio.value = f.slug;
+      radio.checked = f.slug === selectedSlug;
+      if (radio.checked) li.classList.add('sel');
+      radio.addEventListener('change', function () {
+        selectedSlug = f.slug;
+        pastedSlug = null;
+        $('pasteInput').value = '';
+        Array.prototype.forEach.call(ul.children, function (el) { el.classList.remove('sel'); });
+        li.classList.add('sel');
+        updateSave();
+      });
+      var text = document.createElement('div');
+      var t = document.createElement('div');
+      t.className = 't';
+      t.textContent = f.title || f.slug;
+      var meta = document.createElement('div');
+      meta.className = 'm';
+      meta.textContent = (f.is_quiz ? 'Quiz' : 'Form') + ' · ' + (f.response_count || 0) + ' responses';
+      text.appendChild(t);
+      text.appendChild(meta);
+      label.appendChild(radio);
+      label.appendChild(text);
+      li.appendChild(label);
+      ul.appendChild(li);
+    });
+    updateSave();
+  }
+
+  // --- paste fallback ---------------------------------------------------------
+  $('pasteInput').addEventListener('input', function () {
+    var v = this.value.trim();
+    pastedSlug = null;
+    $('pasteErr').classList.add('hidden');
+    if (v) {
+      if (v.indexOf(FORM_URL_PREFIX) === 0) {
+        var s = v.slice(FORM_URL_PREFIX.length).split(/[?#]/)[0].replace(/\/+$/, '');
+        if (SLUG_RE.test(s)) pastedSlug = s;
+      }
+      if (!pastedSlug) {
+        $('pasteErr').textContent = 'That doesn’t look like a form link. It should start with ' + FORM_URL_PREFIX;
+        $('pasteErr').classList.remove('hidden');
+      } else {
+        selectedSlug = null;
+        var ul = $('formList');
+        Array.prototype.forEach.call(ul.children, function (el) { el.classList.remove('sel'); });
+        Array.prototype.forEach.call(ul.querySelectorAll('input[type=radio]'), function (r) { r.checked = false; });
+      }
+    }
+    updateSave();
+  });
+
+  // --- save / cancel -----------------------------------------------------------
+  function chosenSlug() { return pastedSlug || selectedSlug; }
+
+  function updateSave() {
+    $('saveBtn').disabled = !chosenSlug();
+  }
+
+  $('saveBtn').addEventListener('click', function () {
+    var slug = chosenSlug();
+    if (!slug || !nonce) return;
+    var picked = null;
+    for (var i = 0; i < forms.length; i++) if (forms[i].slug === slug) picked = forms[i];
+    var msg = {
+      type: 'dweeb:plugin:save',
+      nonce: nonce,
+      url: FORM_URL_PREFIX + slug,
+      summary: {
+        label: picked ? (picked.title || slug) : 'Form ' + slug,
+        description: picked && picked.is_quiz ? 'RoleLogic quiz' : 'RoleLogic form',
+      },
+    };
+    if (guild) msg.guildId = guild.id;
+    postToHost(msg);
+  });
+
+  $('cancelBtn').addEventListener('click', function () {
+    if (nonce) postToHost({ type: 'dweeb:plugin:cancel', nonce: nonce });
+  });
+
+  window.addEventListener('load', postHeight);
+})();
+</script>
+</body>
+</html>

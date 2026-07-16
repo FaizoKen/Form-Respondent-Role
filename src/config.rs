@@ -53,6 +53,13 @@ pub struct AppConfig {
     /// Base URL of the RoleLogic API used by `RoleLogicClient`. No trailing slash.
     /// Override per environment (prod, staging, DR region) via `ROLELOGIC_API_URL`.
     pub rolelogic_api_url: String,
+    /// Origins allowed to embed the DWEEB form-picker page
+    /// (`routes::dweeb::picker_page`) in an iframe — used to build its
+    /// `Content-Security-Policy: frame-ancestors …` header. Space- or
+    /// comma-separated in `DWEEB_EMBED_ORIGINS`; defaults to the hosted DWEEB
+    /// editor. Add `http://localhost:5173` when developing against a local
+    /// DWEEB.
+    pub dweeb_embed_origins: Vec<String>,
     /// How many job-polling worker tasks to spawn. Each task claims a batch
     /// of jobs concurrently via `FOR UPDATE SKIP LOCKED` so this scales
     /// throughput linearly until DB pool saturation.
@@ -98,6 +105,16 @@ impl AppConfig {
                 .map(|s| s.trim().trim_end_matches('/').to_string())
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "https://api-rolelogic.faizo.net".to_string()),
+            dweeb_embed_origins: {
+                let raw = env::var("DWEEB_EMBED_ORIGINS")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "https://dweeb.faizo.net".to_string());
+                raw.split([' ', ','])
+                    .map(|s| s.trim().trim_end_matches('/').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            },
             worker_concurrency: env::var("WORKER_CONCURRENCY")
                 .ok()
                 .and_then(|v| v.parse().ok())

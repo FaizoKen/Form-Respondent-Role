@@ -60,7 +60,9 @@ async fn require_manager(
     Ok(caller_id)
 }
 
-async fn check_manager(
+/// Shared with `routes::dweeb` (the DWEEB picker bridge uses the exact same
+/// manager gate before minting its read-only picker session).
+pub(crate) async fn check_manager(
     state: &AppState,
     cookie_value: &str,
     guild_id: &str,
