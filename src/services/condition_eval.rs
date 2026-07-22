@@ -558,7 +558,11 @@ mod tests {
             ConditionOperator::ContainsAny,
         ] {
             assert!(
-                !evaluate(false, &[q("hobbies", op, json!(["music"]))], &data(&a, None)),
+                !evaluate(
+                    false,
+                    &[q("hobbies", op, json!(["music"]))],
+                    &data(&a, None)
+                ),
                 "{op:?} should not match an unanswered question"
             );
         }
@@ -738,7 +742,11 @@ mod tests {
         let a = answers(&[("hobbies", json!("music"))]);
         assert!(evaluate(
             false,
-            &[q("hobbies", ConditionOperator::ContainsAny, json!(["music"]))],
+            &[q(
+                "hobbies",
+                ConditionOperator::ContainsAny,
+                json!(["music"])
+            )],
             &data(&a, None),
         ));
         assert!(!evaluate(
