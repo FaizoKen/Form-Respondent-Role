@@ -4,15 +4,16 @@
 //! by [`crate::tasks::job_worker`]. Job payloads (`PlayerSyncPayload`,
 //! `ConfigSyncPayload`) live in [`crate::services::jobs`].
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use futures_util::stream::{self, StreamExt};
+use futures_util::TryStreamExt;
 use serde_json::Value;
 
 use crate::error::AppError;
 use crate::models::condition::Condition;
 use crate::services::auth_gateway;
-use crate::services::condition_eval::{self, ConditionBind, ResponseEvalData};
+use crate::services::condition_eval::{self, ResponseEvalData};
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -23,7 +24,7 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
     let pool = &state.pool;
     let rl_client = &state.rl_client;
 
-    let mut guild_ids = auth_gateway::fetch_user_guild_ids(
+    let gateway_guilds = auth_gateway::fetch_user_guild_ids(
         &state.http,
         &state.config.auth_gateway_url,
         &state.config.internal_api_key,
@@ -34,52 +35,14 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
     // The gateway list only covers guilds this user is in *and that RoleLogic
     // has cached via OAuth*. A respondent who completed a form but never opened
     // the RoleLogic dashboard is absent from it, so per-player sync would never
-    // grant their role until a full per-role-link rebuild ran. Add every guild
-    // where the user has a form_response that the gateway didn't already
-    // return — vetting each for an opt-out (a user who logged in and opted this
-    // guild/plugin out is missing from the gateway list *for that reason*, so
-    // we must not re-add it; a never-logged-in user cannot have opted out).
-    // Convention 40: an opt-out lookup error bubbles up and the job retries.
+    // grant their role until a full per-role-link rebuild ran. Union in every
+    // guild where the user has a form_response; opt-outs are vetted below, for
+    // all of them alike.
     let respondent_guilds: Vec<String> =
         sqlx::query_scalar("SELECT DISTINCT guild_id FROM form_responses WHERE discord_id = $1")
             .bind(discord_id)
             .fetch_all(pool)
             .await?;
-    let known: HashSet<&str> = guild_ids.iter().map(String::as_str).collect();
-    let extra: Vec<String> = respondent_guilds
-        .into_iter()
-        .filter(|g| !known.contains(g.as_str()))
-        .collect();
-    for g in extra {
-        let optouts = auth_gateway::fetch_guild_optout_ids(
-            &state.http,
-            &state.config.auth_gateway_url,
-            &state.config.internal_api_key,
-            &g,
-        )
-        .await?;
-        if !optouts.iter().any(|o| o == discord_id) {
-            guild_ids.push(g);
-        }
-    }
-
-    if guild_ids.is_empty() {
-        return Ok(());
-    }
-
-    // role_links bound to a form, in any guild this user qualifies for.
-    let role_links = sqlx::query_as::<_, (String, String, String, String, bool, Value)>(
-        "SELECT rl.guild_id, rl.role_id, rl.api_token, rl.form_id, rl.grant_on_any_submission, rl.conditions \
-         FROM role_links rl \
-         WHERE rl.guild_id = ANY($1) AND rl.form_id IS NOT NULL",
-    )
-    .bind(&guild_ids[..])
-    .fetch_all(pool)
-    .await?;
-
-    if role_links.is_empty() {
-        return Ok(());
-    }
 
     let existing: HashSet<(String, String)> = sqlx::query_as::<_, (String, String)>(
         "SELECT guild_id, role_id FROM role_assignments WHERE discord_id = $1",
@@ -89,6 +52,69 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
     .await?
     .into_iter()
     .collect();
+
+    let mut candidate_guilds: BTreeSet<String> = gateway_guilds.into_iter().collect();
+    candidate_guilds.extend(respondent_guilds);
+    // Every guild we've already granted in, too — otherwise we can grant a role
+    // we can never take back. Deleting a member's response drops that guild
+    // from `respondent_guilds`, and the admin delete handler enqueues a
+    // player_sync precisely to revoke the role; without the assignment's own
+    // guild in scope the link is never examined and the revoke silently no-ops,
+    // leaving it to the next config save. Anything we assigned stays reachable.
+    candidate_guilds.extend(existing.iter().map(|(g, _)| g.clone()));
+
+    if candidate_guilds.is_empty() {
+        return Ok(());
+    }
+    let candidate_guilds: Vec<String> = candidate_guilds.into_iter().collect();
+
+    // role_links bound to a form, in any guild this user qualifies for.
+    let role_links = sqlx::query_as::<_, (String, String, String, String, bool, Value)>(
+        "SELECT rl.guild_id, rl.role_id, rl.api_token, rl.form_id, rl.grant_on_any_submission, rl.conditions \
+         FROM role_links rl \
+         WHERE rl.guild_id = ANY($1) AND rl.form_id IS NOT NULL",
+    )
+    .bind(&candidate_guilds[..])
+    .fetch_all(pool)
+    .await?;
+
+    if role_links.is_empty() {
+        return Ok(());
+    }
+
+    // Vet EVERY guild that has a link for an opt-out, not just the ones the
+    // gateway didn't return.
+    //
+    // `fetch_user_guild_ids` is passed this plugin's slug and is documented to
+    // drop guilds the user opted out of, which is why gateway-returned guilds
+    // used to be trusted unvetted. But `sync_for_role_link` doesn't take that
+    // on faith — it subtracts `fetch_guild_optout_ids` itself. Two paths
+    // deciding the same question from different sources is the exact shape of
+    // the bug that made these two hand a role back and forth: if the gateway
+    // ever stops honouring the `plugin` scope, the bulk sync drops the
+    // opted-out member and this one puts them straight back, forever. Asking
+    // the same authority the bulk path asks costs one round-trip per
+    // *configured* guild and removes the assumption entirely.
+    //
+    // Narrowed to guilds with a form-bound link first: a user in 50 servers,
+    // one of which runs this plugin, pays for one lookup rather than 50.
+    //
+    // Convention 40: an opt-out lookup error bubbles up and the job retries —
+    // a gateway blip must never read as "nobody opted out".
+    let link_guilds: BTreeSet<String> = role_links.iter().map(|(g, ..)| g.clone()).collect();
+    let mut opted_out: HashSet<String> = HashSet::new();
+    for guild_id in &link_guilds {
+        let optouts = auth_gateway::fetch_guild_optout_ids(
+            &state.http,
+            &state.config.auth_gateway_url,
+            &state.config.internal_api_key,
+            guild_id,
+        )
+        .await?;
+        if optouts.iter().any(|o| o == discord_id) {
+            opted_out.insert(guild_id.clone());
+        }
+    }
 
     enum Action {
         Add {
@@ -105,36 +131,46 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
 
     let mut actions: Vec<Action> = Vec::new();
     for (guild_id, role_id, api_token, form_id, grant_any, raw_conditions) in &role_links {
-        // Evaluate ALL of this user's responses to the form and qualify on any
-        // match — the same semantics as the bulk per-role-link SQL (which does
-        // a DISTINCT over every matching row). Retry-governed and editable
-        // forms keep one canonical row per member, so this only changes
-        // behaviour on unlimited multi-row forms, where the old
-        // latest-row-only check would revoke a role the bulk sync had granted
-        // from an earlier qualifying submission (grant/revoke flapping).
-        let resp_rows = sqlx::query_as::<_, (Value, Option<i32>)>(
-            "SELECT answers, total_score FROM form_responses \
-             WHERE form_id = $1 AND discord_id = $2",
-        )
-        .bind(form_id)
-        .bind(discord_id)
-        .fetch_all(pool)
-        .await?;
+        // Opted out of this plugin in this guild → qualifies for nothing here.
+        // `sync_for_role_link` subtracts the same people from the set it
+        // uploads, so matching it means the opt-out sticks instead of the two
+        // paths reversing each other. It also lands on the member's next form
+        // interaction rather than waiting for someone to re-save the config.
+        let qualifies = if opted_out.contains(guild_id) {
+            false
+        } else {
+            // Evaluate ALL of this user's responses to the form and qualify on
+            // any match — the same semantics as the bulk sync, which collects
+            // every respondent with a qualifying row. Retry-governed and
+            // editable forms keep one canonical row per member, so this only
+            // changes behaviour on unlimited multi-row forms, where the old
+            // latest-row-only check would revoke a role the bulk sync had
+            // granted from an earlier qualifying submission (grant/revoke
+            // flapping).
+            let resp_rows = sqlx::query_as::<_, (Value, Option<i32>)>(
+                "SELECT answers, total_score FROM form_responses \
+                 WHERE form_id = $1 AND discord_id = $2",
+            )
+            .bind(form_id)
+            .bind(discord_id)
+            .fetch_all(pool)
+            .await?;
 
-        let conditions: Vec<Condition> = raw_conditions
-            .as_array()
-            .unwrap_or(&vec![])
-            .iter()
-            .filter_map(|v| serde_json::from_value::<Condition>(v.clone()).ok())
-            .collect();
+            let conditions: Vec<Condition> = raw_conditions
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .filter_map(|v| serde_json::from_value::<Condition>(v.clone()).ok())
+                .collect();
 
-        let qualifies = resp_rows.iter().any(|(answers, total_score)| {
-            let data = ResponseEvalData {
-                answers,
-                total_score: total_score.map(|t| t as i64),
-            };
-            condition_eval::evaluate(*grant_any, &conditions, &data)
-        });
+            resp_rows.iter().any(|(answers, total_score)| {
+                let data = ResponseEvalData {
+                    answers,
+                    total_score: total_score.map(i64::from),
+                };
+                condition_eval::evaluate(*grant_any, &conditions, &data)
+            })
+        };
 
         let currently_assigned = existing.contains(&(guild_id.clone(), role_id.clone()));
         match (qualifies, currently_assigned) {
@@ -354,20 +390,24 @@ pub async fn sync_for_role_link(
     // it rejects the set as over-limit we re-query capped to the real limit it
     // reports and push that. For premium links (cap in the millions) the first
     // push always succeeds, so the cap no longer depends on any API deploy.
-    let qualifying_ids = query_qualifying(pool, &form_id, &optout_ids, &conditions, None).await?;
+    let qualifying_ids =
+        query_qualifying(pool, &form_id, &optout_ids, grant_any, &conditions, None).await?;
 
     // Skip the PUT entirely when the desired set already equals what's assigned
     // (both ordered + de-duped, so `==` is an exact set comparison). Keeps the
     // startup backfill and repeated config_syncs from re-uploading unchanged
-    // links.
-    let current: Vec<String> = sqlx::query_scalar(
-        "SELECT discord_id FROM role_assignments \
-         WHERE guild_id = $1 AND role_id = $2 ORDER BY discord_id",
+    // links. Sorted in Rust, not by `ORDER BY`: `qualifying_ids` comes out of a
+    // BTreeSet, and Postgres' collation order on TEXT need not match Rust's —
+    // mismatched orderings would fail this check on equal sets and re-upload
+    // every time.
+    let mut current: Vec<String> = sqlx::query_scalar(
+        "SELECT discord_id FROM role_assignments WHERE guild_id = $1 AND role_id = $2",
     )
     .bind(guild_id)
     .bind(role_id)
     .fetch_all(pool)
     .await?;
+    current.sort();
     if current == qualifying_ids {
         return Ok(());
     }
@@ -392,8 +432,15 @@ pub async fn sync_for_role_link(
                 qualifying = qualifying_ids.len(),
                 "Qualifying set exceeds role-link cap; capping to the server limit"
             );
-            let capped =
-                query_qualifying(pool, &form_id, &optout_ids, &conditions, Some(limit)).await?;
+            let capped = query_qualifying(
+                pool,
+                &form_id,
+                &optout_ids,
+                grant_any,
+                &conditions,
+                Some(limit),
+            )
+            .await?;
             match rl_client
                 .upload_users(guild_id, role_id, &capped, &api_token)
                 .await
@@ -435,51 +482,74 @@ pub async fn sync_for_role_link(
 }
 
 /// Discord IDs that qualify for a form-bound role link: distinct respondents to
-/// `form_id` who pass `conditions`, minus `optout_ids`. `limit = None` returns
-/// the full set; `Some(n)` caps it (used only to retry after the server reports
-/// an over-cap rejection). Binds: `$1 = form_id`, `$2 = optout_ids`, condition
-/// binds from `$3`, optional `LIMIT` last. `<> ALL($2)` keeps everyone when the
-/// opt-out list is empty.
+/// `form_id` whose responses satisfy the link's eligibility, minus `optout_ids`.
+///
+/// Eligibility is decided by [`condition_eval::evaluate`] — the *same* function
+/// [`sync_for_player`] uses. This path used to translate the conditions into a
+/// SQL `WHERE` clause instead, which had to reproduce the Rust semantics
+/// exactly and didn't: `not_contains` against an unanswered question matched in
+/// SQL but not in Rust, `neq` against a checkbox answer matched in SQL but not
+/// in Rust, and a numeric comparison against a non-numeric answer aborted the
+/// entire query with a cast error rather than simply not matching. Every such
+/// disagreement is a grant/revoke loop — the bulk sync drops a member the
+/// per-player sync just added, RoleLogic strips the role, the per-player sync
+/// adds them back. Sharing one evaluator makes that class of bug
+/// unrepresentable rather than merely fixed.
+///
+/// Rows stream, so peak memory is the qualifying set rather than the response
+/// table. Filtering moved out of SQL but the access path did not: the old
+/// `answers ->> $q` predicates were not indexable either, so both versions scan
+/// this form's rows via `idx_form_responses_form_user`.
+///
+/// `limit = None` returns everyone; `Some(n)` keeps the `n` lowest-sorted IDs
+/// (used only to retry after the server reports an over-cap rejection). The cut
+/// is deterministic, so a capped link doesn't churn a different subset of
+/// members on every sync.
 async fn query_qualifying(
     pool: &sqlx::PgPool,
     form_id: &str,
     optout_ids: &[String],
+    grant_on_any_submission: bool,
     conditions: &[Condition],
     limit: Option<usize>,
 ) -> Result<Vec<String>, AppError> {
-    let (cond_where, cond_binds) = condition_eval::build_condition_where(conditions, 2);
-
-    let mut sql = format!(
-        "SELECT DISTINCT fr.discord_id \
+    // `<> ALL($2)` keeps everyone when the opt-out list is empty.
+    let mut rows = sqlx::query_as::<_, (String, Value, Option<i32>)>(
+        "SELECT fr.discord_id, fr.answers, fr.total_score \
          FROM form_responses fr \
          WHERE fr.form_id = $1 \
            AND fr.discord_id <> '' \
-           AND fr.discord_id <> ALL($2::text[]) \
-           AND ({cond_where}) \
-         ORDER BY fr.discord_id"
-    );
-    if limit.is_some() {
-        let limit_idx = 2 + cond_binds.len() + 1;
-        sql.push_str(&format!(" LIMIT ${limit_idx}"));
-    }
+           AND fr.discord_id <> ALL($2::text[])",
+    )
+    .bind(form_id)
+    .bind(optout_ids)
+    .fetch(pool);
 
-    let mut q = sqlx::query_scalar::<_, String>(&sql);
-    q = q.bind(form_id);
-    q = q.bind(optout_ids);
-    for bind in &cond_binds {
-        match bind {
-            ConditionBind::Int(v) => {
-                q = q.bind(*v);
-            }
-            ConditionBind::Text(v) => {
-                q = q.bind(v.as_str());
-            }
+    // BTreeSet, not Vec + sort: it dedupes and orders in one structure, and the
+    // ordering is Rust's, matching how the caller sorts `role_assignments`.
+    // Postgres' `ORDER BY` on a TEXT column is collation-dependent and would
+    // not necessarily agree.
+    let mut qualifying: BTreeSet<String> = BTreeSet::new();
+    while let Some((discord_id, answers, total_score)) = rows.try_next().await? {
+        // A member qualifies on ANY of their responses (unlimited forms keep a
+        // row per submission), so once they're in there's nothing left to test.
+        if qualifying.contains(&discord_id) {
+            continue;
+        }
+        let data = ResponseEvalData {
+            answers: &answers,
+            total_score: total_score.map(i64::from),
+        };
+        if condition_eval::evaluate(grant_on_any_submission, conditions, &data) {
+            qualifying.insert(discord_id);
         }
     }
-    if let Some(l) = limit {
-        q = q.bind(l as i64);
+
+    let mut ids: Vec<String> = qualifying.into_iter().collect();
+    if let Some(n) = limit {
+        ids.truncate(n);
     }
-    Ok(q.fetch_all(pool).await?)
+    Ok(ids)
 }
 
 // ---------------------------------------------------------------------------

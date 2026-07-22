@@ -137,8 +137,14 @@ fn validate_number(q: &Question, raw: Option<&Value>) -> Result<Option<Value>, S
             return Err(format!("Answer must be at most {max}."));
         }
     }
-    // Store as string so SQL `(fr.answers ->> 'qid')::numeric` works (the
-    // condition SQL builder casts text→numeric explicitly).
+    // Stored as a string, not a JSON number. This predates the condition
+    // evaluator and originally existed so the bulk sync's SQL could cast
+    // `(fr.answers ->> 'qid')::numeric`; that SQL is gone, but the format is
+    // load-bearing for a different reason now — it keeps a canonical decimal
+    // form (jsonb would preserve `5.00`, serde_json would render it `5`, and
+    // the two disagreeing on text is how string comparisons start drifting).
+    // `condition_eval::numeric_value` parses either form, so changing this
+    // would need a data migration for no gain.
     if n.fract() == 0.0 && n.is_finite() {
         Ok(Some(Value::String((n as i64).to_string())))
     } else {

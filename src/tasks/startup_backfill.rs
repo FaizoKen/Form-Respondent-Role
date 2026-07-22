@@ -21,7 +21,19 @@ use crate::AppState;
 /// (which fell back to 100, capping premium links). v2 re-runs after that pre-cap
 /// was removed in favour of letting the RoleLogic server enforce the real cap, so
 /// every link is rebuilt at full size.
-const MEMBERSHIP_RESYNC: &str = "membership_model_resync_v2";
+///
+/// v3 re-runs after the bulk sync stopped translating conditions into SQL and
+/// started sharing `condition_eval::evaluate` with the per-player path. Three
+/// things make a fresh pass mandatory rather than nice-to-have:
+///   * links whose members the old SQL and Rust disagreed about hold a user set
+///     that is simply wrong, and nothing else re-evaluates them;
+///   * links whose SQL aborted outright (`'abc'::numeric`,
+///     `jsonb_array_elements_text` on a scalar) failed every `config_sync` eight
+///     times and left them in the DLQ — dead jobs are never retried, so those
+///     links have not synced since the first bad answer landed;
+///   * `not_contains` on an unanswered question and `eq`/`neq` on a checkbox
+///     changed meaning, so even a healthy link can hold a stale set.
+const MEMBERSHIP_RESYNC: &str = "membership_model_resync_v3";
 
 /// Run all pending one-time backfills. Best-effort: failures are logged, never
 /// fatal — the server still starts, and an un-run backfill is retried on the
