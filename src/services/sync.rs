@@ -99,20 +99,41 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
     // Narrowed to guilds with a form-bound link first: a user in 50 servers,
     // one of which runs this plugin, pays for one lookup rather than 50.
     //
-    // Convention 40: an opt-out lookup error bubbles up and the job retries —
-    // a gateway blip must never read as "nobody opted out".
+    // Convention 40, per guild rather than per job: a lookup error must never
+    // read as "nobody opted out", so a guild whose lookup failed gets NO
+    // actions this run (adding could violate an opt-out, removing could strip
+    // a valid role) and the job returns Err at the end so it retries. What it
+    // must NOT do is fail the whole job up front — one guild's gateway hiccup
+    // repeated eight times sends the job to the DLQ and silently kills this
+    // user's role healing in every OTHER guild too, which reaches users as
+    // "I filled in the form / the admin restored my list entry, and the role
+    // never comes back". Actions are idempotent, so the guilds that succeeded
+    // here are simply no-ops on the retry.
     let link_guilds: BTreeSet<String> = role_links.iter().map(|(g, ..)| g.clone()).collect();
     let mut opted_out: HashSet<String> = HashSet::new();
+    let mut optout_unknown: HashSet<String> = HashSet::new();
     for guild_id in &link_guilds {
-        let optouts = auth_gateway::fetch_guild_optout_ids(
+        match auth_gateway::fetch_guild_optout_ids(
             &state.http,
             &state.config.auth_gateway_url,
             &state.config.internal_api_key,
             guild_id,
         )
-        .await?;
-        if optouts.iter().any(|o| o == discord_id) {
-            opted_out.insert(guild_id.clone());
+        .await
+        {
+            Ok(optouts) => {
+                if optouts.iter().any(|o| o == discord_id) {
+                    opted_out.insert(guild_id.clone());
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    guild_id,
+                    discord_id,
+                    "Opt-out lookup failed; skipping this guild's actions this run: {e}"
+                );
+                optout_unknown.insert(guild_id.clone());
+            }
         }
     }
 
@@ -131,6 +152,10 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
 
     let mut actions: Vec<Action> = Vec::new();
     for (guild_id, role_id, api_token, form_id, grant_any, raw_conditions) in &role_links {
+        // Opt-out status unknown → neither direction is safe; retried below.
+        if optout_unknown.contains(guild_id) {
+            continue;
+        }
         // Opted out of this plugin in this guild → qualifies for nothing here.
         // `sync_for_role_link` subtracts the same people from the set it
         // uploads, so matching it means the opt-out sticks instead of the two
@@ -188,8 +213,22 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
         }
     }
 
+    // Deferred Convention-40 failure: everything decidable has been decided
+    // (and is applied below); the guilds we could not vet still owe a retry.
+    let deferred = if optout_unknown.is_empty() {
+        None
+    } else {
+        Some(AppError::Internal(format!(
+            "opt-out lookup failed for {} guild(s); retrying those",
+            optout_unknown.len()
+        )))
+    };
+
     if actions.is_empty() {
-        return Ok(());
+        return match deferred {
+            Some(e) => Err(e),
+            None => Ok(()),
+        };
     }
 
     let discord_id_owned = discord_id.to_string();
@@ -303,7 +342,10 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
         })
         .await;
 
-    Ok(())
+    match deferred {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 // ---------------------------------------------------------------------------
