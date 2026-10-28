@@ -105,27 +105,28 @@ pub(crate) async fn check_manager(
 }
 
 /// HTML variant: on failure returns a rendered HTML page (sign-in CTA or
-/// access-denied page). Use for routes the user navigates to directly.
+/// access-denied page; boxed, a `Response` is large). Use for routes the
+/// user navigates to directly.
 async fn require_manager_html(
     state: &AppState,
     jar: &CookieJar,
     guild_id: &str,
-) -> Result<String, Response> {
+) -> Result<String, Box<Response>> {
     let cookie = match jar.get(SESSION_COOKIE) {
         Some(c) => c,
-        None => return Err(render_signin_page(state)),
+        None => return Err(Box::new(render_signin_page(state))),
     };
     let session = session::verify_session(cookie.value(), &state.config.session_secret);
     let Some((caller_id, _)) = session else {
-        return Err(render_signin_page(state));
+        return Err(Box::new(render_signin_page(state)));
     };
     match check_manager(state, cookie.value(), guild_id).await {
         Ok(()) => Ok(caller_id),
-        Err(AppError::Forbidden(msg)) => Err(render_access_denied(state, &msg)),
-        Err(_) => Err(render_access_denied(
+        Err(AppError::Forbidden(msg)) => Err(Box::new(render_access_denied(state, &msg))),
+        Err(_) => Err(Box::new(render_access_denied(
             state,
             "Could not verify your permissions for this guild. Try reloading.",
-        )),
+        ))),
     }
 }
 
@@ -394,7 +395,7 @@ pub async fn list_page(
         };
     if ro_token.is_none() {
         if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
-            return resp;
+            return *resp;
         }
     }
     let body = ADMIN_LIST_TEMPLATE
@@ -614,7 +615,7 @@ pub async fn builder_page(
         };
     if ro_token.is_none() {
         if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
-            return resp;
+            return *resp;
         }
     }
     let body = BUILDER_TEMPLATE
@@ -1181,7 +1182,7 @@ pub async fn responses_page(
         };
     if ro_token.is_none() {
         if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
-            return resp;
+            return *resp;
         }
     }
     let body = RESPONSES_TEMPLATE
@@ -1532,7 +1533,7 @@ pub async fn role_config_page(
         Some(token) if !token.is_empty() => {
             match verify_iframe_entry(&state, &guild_id, &role_id, token).await {
                 Ok((t, ro)) => (Some(t), ro),
-                Err(resp) => return resp,
+                Err(resp) => return *resp,
             }
         }
         _ => (None, false),
@@ -1541,7 +1542,7 @@ pub async fn role_config_page(
     // Path 2: direct nav — cookie + manager check.
     if iframe_session.is_none() {
         if let Err(resp) = require_manager_html(&state, &jar, &guild_id).await {
-            return resp;
+            return *resp;
         }
     }
 
@@ -1566,27 +1567,27 @@ pub async fn role_config_page(
 }
 
 /// Verify `?rl_token=…` and return `(iframe_session_token, read_only)`.
-/// On failure, returns a rendered error page (so the iframe shows something
-/// useful instead of an empty body).
+/// On failure, returns a rendered error page, boxed (so the iframe shows
+/// something useful instead of an empty body).
 async fn verify_iframe_entry(
     state: &AppState,
     guild_id: &str,
     role_id: &str,
     rl_token: &str,
-) -> Result<(String, bool), Response> {
+) -> Result<(String, bool), Box<Response>> {
     let api_token: Option<String> =
         sqlx::query_scalar("SELECT api_token FROM role_links WHERE guild_id = $1 AND role_id = $2")
             .bind(guild_id)
             .bind(role_id)
             .fetch_optional(&state.pool)
             .await
-            .map_err(|e| render_iframe_error(state, &format!("Database error: {e}")))?;
+            .map_err(|e| Box::new(render_iframe_error(state, &format!("Database error: {e}"))))?;
 
     let Some(api_token) = api_token else {
-        return Err(render_iframe_error(
+        return Err(Box::new(render_iframe_error(
             state,
             "This role link isn't registered with this plugin yet.",
-        ));
+        )));
     };
 
     let verified = rl_token::verify(rl_token, &api_token, &state.config.base_url).map_err(|e| {
@@ -1600,17 +1601,17 @@ async fn verify_iframe_entry(
             rl_token::RlTokenError::WrongAudience => "Token is for a different plugin.",
             rl_token::RlTokenError::WrongIssuer => "Token was not issued by RoleLogic.",
         };
-        render_iframe_error(state, msg)
+        Box::new(render_iframe_error(state, msg))
     })?;
 
     // Cross-check: the claims must match the path. RoleLogic signs each
     // token for a specific (guild_id, role_id), so a token signed for one
     // role link cannot be reused on a different page.
     if verified.guild_id != guild_id || verified.role_id != role_id {
-        return Err(render_iframe_error(
+        return Err(Box::new(render_iframe_error(
             state,
             "Token does not match this role link.",
-        ));
+        )));
     }
 
     if verified.read_only {
