@@ -3,6 +3,10 @@
 //! The functions in this module are the dispatch targets for jobs claimed
 //! by [`crate::tasks::job_worker`]. Job payloads (`PlayerSyncPayload`,
 //! `ConfigSyncPayload`) live in [`crate::services::jobs`].
+//!
+//! A disabled or paused link is skipped, and a list write RoleLogic holds for
+//! owner confirmation is re-checked on a timer (`recheck_held`); both are
+//! expected states, not job failures.
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -12,8 +16,8 @@ use serde_json::Value;
 
 use crate::error::AppError;
 use crate::models::condition::Condition;
-use crate::services::auth_gateway;
 use crate::services::condition_eval::{self, ResponseEvalData};
+use crate::services::{auth_gateway, jobs};
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -394,6 +398,7 @@ pub async fn sync_for_role_link(
             }
             // Disabled link: leave config + assignments intact, just skip.
             Err(AppError::RoleLinkDisabled) => return Ok(()),
+            Err(AppError::RemovalHeld) => return recheck_held(guild_id, role_id, pool).await,
             Err(e) => return Err(e),
         }
         sqlx::query("DELETE FROM role_assignments WHERE guild_id = $1 AND role_id = $2")
@@ -466,6 +471,7 @@ pub async fn sync_for_role_link(
             return Ok(());
         }
         Err(AppError::RoleLinkDisabled) => return Ok(()),
+        Err(AppError::RemovalHeld) => return recheck_held(guild_id, role_id, pool).await,
         Err(AppError::UserLimitReached { limit }) => {
             tracing::warn!(
                 guild_id,
@@ -493,6 +499,7 @@ pub async fn sync_for_role_link(
                     return Ok(());
                 }
                 Err(AppError::RoleLinkDisabled) => return Ok(()),
+                Err(AppError::RemovalHeld) => return recheck_held(guild_id, role_id, pool).await,
                 Err(e) => return Err(e),
             }
             capped
@@ -638,6 +645,27 @@ pub async fn remove_all_assignments(discord_id: &str, state: &AppState) -> Resul
         .await?;
 
     Ok(())
+}
+
+/// How soon a held write is tried again. Confirming the removals in the
+/// RoleLogic dashboard lets the next write through for an hour, and this
+/// plugin has no periodic re-sync (a link re-syncs only when an admin saves
+/// its config, or edits, deletes or clears its form), so without this the
+/// confirmed write would never be sent.
+const HELD_RECHECK_SECS: u64 = 20 * 60;
+
+/// RoleLogic is holding this link's write until an owner confirms the
+/// removals (Safe Apply's shrink gate). That is a decision waiting on a
+/// person, not a failure: leave the local mirror as it was and look again
+/// later, recomputing the list then.
+async fn recheck_held(guild_id: &str, role_id: &str, pool: &sqlx::PgPool) -> Result<(), AppError> {
+    tracing::info!(
+        guild_id,
+        role_id,
+        "RoleLogic is holding this link's removals for owner confirmation; re-checking in {} min",
+        HELD_RECHECK_SECS / 60
+    );
+    jobs::enqueue_config_sync_unless_queued(pool, guild_id, role_id, HELD_RECHECK_SECS).await
 }
 
 /// Delete a role_link the RoleLogic API reports as 404 (deleted upstream).
