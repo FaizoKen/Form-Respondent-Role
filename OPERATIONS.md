@@ -129,7 +129,7 @@ Phase 0.1 follow-up; currently a single global limiter).
 
 Knobs (env, defaults in parens):
 
-- `DB_MAX_CONNECTIONS` (16)
+- `DB_MAX_CONNECTIONS` (10)
 - `DB_MIN_CONNECTIONS` (2)
 - `DB_ACQUIRE_TIMEOUT_SECS` (5)
 - `DB_IDLE_TIMEOUT_SECS` (600)
