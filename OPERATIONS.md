@@ -140,7 +140,9 @@ Budget guidance:
 - Behind pgBouncer in transaction-pool mode: replicas × `DB_MAX_CONNECTIONS`
   ≤ pgBouncer pool size. Each replica's `WORKER_CONCURRENCY` shares the
   pool with the HTTP tier; cap workers to ~half the pool so admin pages
-  don't starve under sync load.
+  don't starve under sync load. pgBouncer must be 1.21+ with
+  `max_prepared_statements` ≥ 100, the per-connection
+  `STATEMENT_CACHE_CAPACITY` in `src/db.rs`.
 - No pgBouncer: budget conservatively against raw Postgres `max_connections`.
   The default Postgres ships with `max_connections = 100`, and Form-Respondent-Role's
   `compose.yml` sets `max_connections = 15` for the local dev container —

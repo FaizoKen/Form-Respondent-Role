@@ -138,7 +138,9 @@ Production target is **multi-region public service, 1000+ guilds**.
    - LB should hit `/form-respondent-role/ready` for traffic gating
      (drains to 503 on SIGTERM) and `/form-respondent-role/health` for
      liveness (503 when DB is unreachable).
-3. Run pgBouncer in transaction-pool mode in front of Postgres.
+3. Run pgBouncer 1.21+ in transaction-pool mode in front of Postgres,
+   with `max_prepared_statements` ≥ 100 (each pooled connection keeps up
+   to 100 prepared statements; see `src/db.rs`).
    Budget `replicas * DB_MAX_CONNECTIONS` ≤ pgBouncer pool size.
 4. Set `RL_DASHBOARD_ORIGIN` to the dashboard's public origin so admin
    pages can be iframed.
