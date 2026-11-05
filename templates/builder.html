@@ -1917,6 +1917,17 @@ async function save() {
   // too — the PUT would be rejected before reaching the handler.
   if (READ_ONLY) { roBlocked(); return; }
   state.schema.title = state.title;
+  // A question with a ticked answer and an emptied Points box shows "1 pt"
+  // on its card (effPoints), but the server only scores questions that carry
+  // points — so it would silently score 0. Store the 1 the builder shows.
+  // An explicit 0 stays 0: that is how a question is left ungraded.
+  if (state.is_quiz) {
+    for (const p of state.schema.pages) {
+      for (const q of p.questions) {
+        if (hasCorrect(q) && q.points == null) q.points = 1;
+      }
+    }
+  }
   const body = {
     title: state.title || 'Untitled form',
     description: state.schema.description || '',

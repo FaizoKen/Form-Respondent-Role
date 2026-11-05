@@ -191,7 +191,12 @@ pub async fn get_form(
             return Ok(render_status_page(
                 &state.config.base_url,
                 &form.title,
-                &format!("This form opens at {}.", open_at.to_rfc3339()),
+                // Read by a member, not a parser: "10 Nov 2026 at 18:00 (UTC)",
+                // not the RFC 3339 timestamp this used to print.
+                &format!(
+                    "This form opens on {} (UTC).",
+                    open_at.format("%-d %b %Y at %H:%M")
+                ),
             ));
         }
     }
