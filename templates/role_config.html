@@ -613,6 +613,7 @@ select {
           </div>
         </label>
       </div>
+      <div id="quiz-any-warn" class="warn" style="display:none;"></div>
 
       <div id="conds">
         <div id="cond-empty" class="cond-empty" style="display:none;">
@@ -1035,6 +1036,23 @@ function renderModeRadios() {
     };
   });
   document.getElementById('conds').classList.toggle('shown', mode === 'conditions');
+
+  // "Anyone who submits" is the default, and on a quiz it hands the role to
+  // members the quiz just told "not passed" — the form grades, but nothing
+  // here reads the grade. Say so where the choice is made.
+  const warn = document.getElementById('quiz-any-warn');
+  const form = currentForm();
+  if (mode === 'any_submission' && form && form.is_quiz) {
+    const mark = typeof form.passing_score === 'number'
+      ? ` and add <strong>Quiz total score ≥ ${form.passing_score}</strong>`
+      : '';
+    warn.innerHTML = 'This form is a quiz. <strong>Anyone who submits</strong> gives the role to everyone who finishes, '
+      + 'including members who don\'t pass. To reward only members who pass, choose '
+      + '<strong>Only if their answers match…</strong>' + mark + '.';
+    warn.style.display = 'flex';
+  } else {
+    warn.style.display = 'none';
+  }
 }
 
 function renderConditions() {
