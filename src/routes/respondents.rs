@@ -80,7 +80,7 @@ pub fn render_respondents_page(base_url: &str) -> String {
                 document.getElementById('content').innerHTML = '<div class="empty">No respondents yet.</div>';
             }} else {{
                 tbody.innerHTML = data.respondents.map(r =>
-                    '<tr><td>' + escapeHtml(r.discord_id) + '</td><td>' + escapeHtml(r.submitted_at) + '</td><td>' + escapeHtml(r.last_edited_at) + '</td></tr>'
+                    '<tr><td>' + escapeHtml(r.display_name ? r.display_name + ' · ' + r.discord_id : r.discord_id) + '</td><td>' + escapeHtml(r.submitted_at) + '</td><td>' + escapeHtml(r.last_edited_at) + '</td></tr>'
                 ).join('');
             }}
             document.getElementById('loading').classList.add('hidden');
@@ -210,9 +210,11 @@ pub async fn data(
             String,
             chrono::DateTime<chrono::Utc>,
             chrono::DateTime<chrono::Utc>,
+            Option<String>,
         ),
     >(
-        "SELECT DISTINCT ON (fr.discord_id) fr.discord_id, fr.submitted_at, fr.last_edited_at \
+        "SELECT DISTINCT ON (fr.discord_id) fr.discord_id, fr.submitted_at, fr.last_edited_at, \
+                fr.display_name \
          FROM form_responses fr \
          JOIN role_links rl ON rl.form_id = fr.form_id \
          WHERE rl.guild_id = $1 AND fr.discord_id <> '' \
@@ -226,9 +228,10 @@ pub async fn data(
 
     let respondents: Vec<Value> = rows
         .into_iter()
-        .map(|(discord_id, submitted_at, last_edited_at)| {
+        .map(|(discord_id, submitted_at, last_edited_at, display_name)| {
             json!({
                 "discord_id": discord_id,
+                "display_name": display_name,
                 "submitted_at": submitted_at.to_rfc3339(),
                 "last_edited_at": last_edited_at.to_rfc3339(),
             })

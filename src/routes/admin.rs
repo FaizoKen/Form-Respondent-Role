@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 
 use crate::error::AppError;
 use crate::models::condition::{ConditionOperator, ConditionTarget};
-use crate::models::form::FormSchema;
+use crate::models::form::{FormSchema, Question};
 use crate::schema::{self, RoleConfigBody};
 use crate::services::csrf;
 use crate::services::form_validator;
@@ -1226,10 +1226,11 @@ pub async fn responses_data(
             chrono::DateTime<chrono::Utc>,
             i32,
             Option<bool>,
+            Option<String>,
         ),
     >(
         "SELECT id, discord_id, answers, total_score, submitted_at, last_edited_at, \
-                attempt_count, passed \
+                attempt_count, passed, display_name \
          FROM form_responses WHERE form_id = $1 ORDER BY last_edited_at DESC LIMIT 1000",
     )
     .bind(&form_id)
@@ -1239,10 +1240,12 @@ pub async fn responses_data(
     let responses: Vec<Value> = rows
         .into_iter()
         .map(
-            |(id, did, answers, score, submitted, edited, attempt_count, passed)| {
+            |(id, did, answers, score, submitted, edited, attempt_count, passed, name)| {
                 json!({
                     "id": id.to_string(),
                     "discord_id": did,
+                    // NULL on rows submitted before migration 011.
+                    "display_name": name,
                     "answers": answers,
                     "total_score": score,
                     "submitted_at": submitted.to_rfc3339(),
@@ -1430,9 +1433,10 @@ pub async fn responses_csv(
             Option<i32>,
             chrono::DateTime<chrono::Utc>,
             chrono::DateTime<chrono::Utc>,
+            Option<String>,
         ),
     >(
-        "SELECT discord_id, answers, total_score, submitted_at, last_edited_at \
+        "SELECT discord_id, answers, total_score, submitted_at, last_edited_at, display_name \
          FROM form_responses WHERE form_id = $1 ORDER BY submitted_at",
     )
     .bind(&form_id)
@@ -1443,6 +1447,7 @@ pub async fn responses_csv(
     let answerable: Vec<_> = schema.iter_questions().collect();
     let mut header = vec![
         "discord_id".to_string(),
+        "discord_name".to_string(),
         "submitted_at".to_string(),
         "last_edited_at".to_string(),
     ];
@@ -1454,14 +1459,19 @@ pub async fn responses_csv(
     }
     out.push_str(&csv_row(&header));
 
-    for (did, answers, score, submitted, edited) in rows {
-        let mut row = vec![did, submitted.to_rfc3339(), edited.to_rfc3339()];
+    for (did, answers, score, submitted, edited, name) in rows {
+        let mut row = vec![
+            did,
+            name.unwrap_or_default(),
+            submitted.to_rfc3339(),
+            edited.to_rfc3339(),
+        ];
         if is_quiz {
             row.push(score.map(|s| s.to_string()).unwrap_or_default());
         }
         for q in &answerable {
             let v = answers.get(&q.id);
-            row.push(answer_to_csv(v));
+            row.push(answer_to_csv(q, v));
         }
         out.push_str(&csv_row(&row));
     }
@@ -2020,17 +2030,71 @@ fn operator_catalog() -> Vec<Value> {
 #[allow(dead_code)]
 fn _refer_to_condition_target(_t: ConditionTarget) {}
 
-fn answer_to_csv(v: Option<&Value>) -> String {
+/// One CSV cell. Choice answers are stored as option ids — random ones like
+/// `o_k3j2h1x` for options added in the builder — so they are written as the
+/// option's label, the same text the Responses table shows. An id with no
+/// matching option (deleted since) falls back to the id itself.
+fn answer_to_csv(q: &Question, v: Option<&Value>) -> String {
+    let label = |id: &str| -> String {
+        q.options
+            .as_ref()
+            .and_then(|opts| opts.iter().find(|o| o.id == id))
+            .map(|o| o.label.clone())
+            .unwrap_or_else(|| id.to_string())
+    };
     match v {
         None | Some(Value::Null) => String::new(),
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::String(s)) => label(s.as_str()),
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::Bool(b)) => b.to_string(),
         Some(Value::Array(arr)) => arr
             .iter()
-            .filter_map(|v| v.as_str().map(str::to_string))
+            .filter_map(|v| v.as_str().map(label))
             .collect::<Vec<_>>()
             .join("; "),
         Some(other) => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod csv_tests {
+    use super::*;
+    use crate::models::form::{QuestionKind, QuestionOption};
+
+    fn choice(kind: QuestionKind) -> Question {
+        serde_json::from_value(json!({
+            "id": "q1",
+            "kind": kind.as_str(),
+            "title": "Pick",
+            "options": [
+                { "id": "o_k3j2h1x", "label": "Europe" },
+                { "id": "na", "label": "North America" },
+            ],
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn choice_ids_export_as_labels() {
+        let q = choice(QuestionKind::SingleChoice);
+        assert_eq!(answer_to_csv(&q, Some(&json!("o_k3j2h1x"))), "Europe");
+        let m = choice(QuestionKind::MultiChoice);
+        assert_eq!(
+            answer_to_csv(&m, Some(&json!(["na", "o_k3j2h1x"]))),
+            "North America; Europe"
+        );
+    }
+
+    #[test]
+    fn unknown_ids_and_free_text_pass_through() {
+        let q = choice(QuestionKind::Dropdown);
+        assert_eq!(answer_to_csv(&q, Some(&json!("gone"))), "gone");
+        let mut t = choice(QuestionKind::ShortText);
+        t.options = None::<Vec<QuestionOption>>;
+        assert_eq!(
+            answer_to_csv(&t, Some(&json!("hello, world"))),
+            "hello, world"
+        );
+        assert_eq!(answer_to_csv(&t, None), "");
     }
 }

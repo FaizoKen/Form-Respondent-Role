@@ -278,6 +278,7 @@ tbody tr { transition: background var(--ease); }
 tbody tr:hover td { background: var(--surface-2); }
 tbody tr:last-child td { border-bottom: none; }
 td.user { color: var(--text); font-weight: 500; }
+td.user .uid { display: block; color: var(--text-faint); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; margin-top: 2px; }
 td.when { color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .score-pill {
   display: inline-block;
@@ -554,7 +555,9 @@ function render(data) {
   // Stat strip
   const totalResponses = data.responses.length;
   const answerable = [];
-  for (const p of (data.schema.pages || [])) for (const q of (p.questions || [])) if (q.kind !== 'info') answerable.push(q);
+  // Display-only blocks (info text, images, videos) collect no answer, so they
+  // get no stat, chart or column — the same set the form page counts.
+  for (const p of (data.schema.pages || [])) for (const q of (p.questions || [])) if (!['info', 'image', 'video'].includes(q.kind)) answerable.push(q);
   const totalQuestions = answerable.length;
 
   h += '<div class="stats">';
@@ -599,7 +602,12 @@ function render(data) {
   if (!READ_ONLY) h += '<th>Actions</th>';
   h += '</tr></thead><tbody>';
   for (const r of data.responses) {
-    h += '<tr><td class="user">' + escapeHtml(r.discord_id) + '</td><td class="when">' + new Date(r.submitted_at).toLocaleString() + '</td>';
+    // The name their Discord sign-in carried when they submitted; responses
+    // from before names were stored show the ID alone.
+    const who = r.display_name
+      ? escapeHtml(r.display_name) + '<span class="uid">' + escapeHtml(r.discord_id) + '</span>'
+      : escapeHtml(r.discord_id);
+    h += '<tr><td class="user">' + who + '</td><td class="when">' + new Date(r.submitted_at).toLocaleString() + '</td>';
     if (data.is_quiz) h += '<td><span class="score-pill">' + (r.total_score ?? '–') + '</span></td>';
     for (const q of answerable) {
       const v = r.answers[q.id];
@@ -618,7 +626,7 @@ function render(data) {
     }
     if (!READ_ONLY) {
       h += '<td class="actions"><button type="button" class="row-del" title="Delete response"'
-        + ' data-del-id="' + escapeHtml(r.id) + '" data-del-user="' + escapeHtml(r.discord_id) + '">'
+        + ' data-del-id="' + escapeHtml(r.id) + '" data-del-user="' + escapeHtml(r.display_name || r.discord_id) + '">'
         + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
         + '</button></td>';
     }

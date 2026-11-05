@@ -73,6 +73,10 @@ pub async fn run_migrations(pool: &PgPool) {
             "010",
             include_str!("../migrations/010_startup_backfill.sql"),
         ),
+        (
+            "011",
+            include_str!("../migrations/011_response_display_name.sql"),
+        ),
     ];
     for (id, sql) in migrations {
         sqlx::raw_sql(sql)

@@ -507,8 +507,8 @@ pub async fn post_submit(
     let response_id: Option<uuid::Uuid> = if !single_submission {
         // Unlimited form: every submit is a fresh row (existing behaviour).
         let id = sqlx::query_scalar::<_, uuid::Uuid>(
-            "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed) \
-             VALUES ($1, $2, $3, $4, $5, $6, 1, $7) RETURNING id",
+            "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed, display_name) \
+             VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8) RETURNING id",
         )
         .bind(&form_id_text)
         .bind(&guild_id)
@@ -517,6 +517,7 @@ pub async fn post_submit(
         .bind(total_score)
         .bind(version)
         .bind(stored_passed)
+        .bind(&display_name)
         .fetch_one(&mut *tx)
         .await?;
         Some(id)
@@ -534,7 +535,8 @@ pub async fn post_submit(
         if let Some(id) = existing {
             sqlx::query(
                 "UPDATE form_responses SET answers = $1, total_score = $2, passed = $3, \
-                                            schema_version = $4, last_edited_at = now() \
+                                            schema_version = $4, display_name = $6, \
+                                            last_edited_at = now() \
                  WHERE id = $5",
             )
             .bind(&answers_json)
@@ -542,13 +544,14 @@ pub async fn post_submit(
             .bind(stored_passed)
             .bind(version)
             .bind(id)
+            .bind(&display_name)
             .execute(&mut *tx)
             .await?;
             Some(id)
         } else {
             let id = sqlx::query_scalar::<_, uuid::Uuid>(
-                "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed) \
-                 VALUES ($1, $2, $3, $4, $5, $6, 1, $7) RETURNING id",
+                "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed, display_name) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8) RETURNING id",
             )
             .bind(&form_id_text)
             .bind(&guild_id)
@@ -557,6 +560,7 @@ pub async fn post_submit(
             .bind(total_score)
             .bind(version)
             .bind(stored_passed)
+            .bind(&display_name)
             .fetch_one(&mut *tx)
             .await?;
             Some(id)
@@ -621,7 +625,7 @@ pub async fn post_submit(
                 sqlx::query(
                     "UPDATE form_responses SET answers = $1, total_score = $2, passed = $3, \
                                                 attempt_count = $4, schema_version = $5, \
-                                                last_edited_at = now() \
+                                                display_name = $7, last_edited_at = now() \
                      WHERE id = $6",
                 )
                 .bind(&answers_json)
@@ -630,6 +634,7 @@ pub async fn post_submit(
                 .bind(accepted.attempt_count)
                 .bind(version)
                 .bind(r.id)
+                .bind(&display_name)
                 .execute(&mut *tx)
                 .await?;
             } else {
@@ -638,21 +643,23 @@ pub async fn post_submit(
                 // (count + cooldown clock) and sticky pass/score.
                 sqlx::query(
                     "UPDATE form_responses SET total_score = $1, passed = $2, \
-                                                attempt_count = $3, last_edited_at = now() \
+                                                attempt_count = $3, display_name = $5, \
+                                                last_edited_at = now() \
                      WHERE id = $4",
                 )
                 .bind(accepted.total_score)
                 .bind(accepted.passed)
                 .bind(accepted.attempt_count)
                 .bind(r.id)
+                .bind(&display_name)
                 .execute(&mut *tx)
                 .await?;
             }
             Some(r.id)
         } else {
             let id = sqlx::query_scalar::<_, uuid::Uuid>(
-                "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+                "INSERT INTO form_responses (form_id, guild_id, discord_id, answers, total_score, schema_version, attempt_count, passed, display_name) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
             )
             .bind(&form_id_text)
             .bind(&guild_id)
@@ -662,6 +669,7 @@ pub async fn post_submit(
             .bind(version)
             .bind(accepted.attempt_count)
             .bind(accepted.passed)
+            .bind(&display_name)
             .fetch_one(&mut *tx)
             .await?;
             Some(id)
