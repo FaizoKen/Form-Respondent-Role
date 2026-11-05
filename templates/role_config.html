@@ -233,7 +233,10 @@ select {
   cursor: pointer;
 }
 .radio-opt .opt-main { flex: 1; min-width: 0; }
-.radio-opt .opt-main strong {
+/* The option's title only (`>`): a descendant selector also caught the
+   inline <strong>All</strong> in "Only if their answers match…"'s
+   description and broke it onto a line of its own. */
+.radio-opt .opt-main > strong {
   display: block;
   color: var(--text);
   font-size: 14.5px;
@@ -549,7 +552,7 @@ select {
   /* Radio cards: drop the bigger min-height — content already determines
      it and 50px is a lot of wasted space when the labels are tight. */
   .radio-opt { min-height: 0; padding: 12px 14px; }
-  .radio-opt .opt-main strong { font-size: 14px; }
+  .radio-opt .opt-main > strong { font-size: 14px; }
   .radio-opt .opt-main span { font-size: 12.5px; }
 }
 
@@ -1046,9 +1049,11 @@ function renderModeRadios() {
     const mark = typeof form.passing_score === 'number'
       ? ` and add <strong>Quiz total score ≥ ${form.passing_score}</strong>`
       : '';
-    warn.innerHTML = 'This form is a quiz. <strong>Anyone who submits</strong> gives the role to everyone who finishes, '
+    // One <span>: .warn is a flex row (icon + text), so bare text and
+    // <strong> nodes would each become a column of their own.
+    warn.innerHTML = '<span>This form is a quiz. <strong>Anyone who submits</strong> gives the role to everyone who finishes, '
       + 'including members who don\'t pass. To reward only members who pass, choose '
-      + '<strong>Only if their answers match…</strong>' + mark + '.';
+      + '<strong>Only if their answers match…</strong>' + mark + '.</span>';
     warn.style.display = 'flex';
   } else {
     warn.style.display = 'none';

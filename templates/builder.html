@@ -1666,7 +1666,7 @@ function selectQ(qid) {
       h += `<label style="margin-top:0;">Correct answer</label><input type="date" data-i="correct-num" value="${escapeHtml(firstCorrect(q))}">`;
     } else {
       // short_text / long_text / email
-      h += `<label style="margin-top:0;">Accepted answers <span style="text-transform:none;font-weight:400;color:var(--text-faint);">— one per line; case &amp; spacing ignored</span></label><textarea data-i="correct-text" placeholder="Type each accepted answer on its own line">${escapeHtml(correctLines(q))}</textarea>`;
+      h += `<label style="margin-top:0;">Accepted answers <span style="text-transform:none;font-weight:400;color:var(--text-faint);">— one per line; capitals don't matter</span></label><textarea data-i="correct-text" placeholder="Type each accepted answer on its own line">${escapeHtml(correctLines(q))}</textarea>`;
     }
     const showPointsHint = !hasCorrect(q);
     h += `<label>Points${showPointsHint ? ` <span style="text-transform:none;font-weight:400;color:var(--text-faint);">— counts once an answer is set</span>` : ''}</label><input type="number" min="0" data-i="points" value="${q.points == null ? 1 : q.points}">`;
