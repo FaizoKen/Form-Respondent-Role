@@ -233,7 +233,7 @@ pub async fn get_form(
     }
 
     if form.require_verified {
-        let guild_ids = match crate::services::auth_gateway::fetch_user_guild_ids(
+        let guild_ids = match crate::services::auth_gateway::fetch_member_guild_ids(
             &state.http,
             &state.config.auth_gateway_url,
             &state.config.internal_api_key,
@@ -450,7 +450,7 @@ pub async fn post_submit(
         }
     }
     if require_verified {
-        let guild_ids = crate::services::auth_gateway::fetch_user_guild_ids(
+        let guild_ids = crate::services::auth_gateway::fetch_member_guild_ids(
             &state.http,
             &state.config.auth_gateway_url,
             &state.config.internal_api_key,
