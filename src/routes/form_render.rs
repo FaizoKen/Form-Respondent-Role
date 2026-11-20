@@ -692,7 +692,9 @@ pub async fn post_submit(
     .await?;
 
     if let Some(url) = webhook_url.as_ref() {
-        if !url.trim().is_empty() {
+        // A Discord link that is not a webhook (saved before the builder
+        // refused them) would only fail; the builder already tells the owner.
+        if !url.trim().is_empty() && webhook::discord_url_problem(url).is_none() {
             let payload = webhook::build_payload(
                 &form_title,
                 &slug,

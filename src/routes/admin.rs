@@ -662,13 +662,16 @@ pub async fn builder_data(
         retry_cooldown_seconds: i32,
         retry_policy: String,
         lock_on_pass: bool,
+        webhook_error: Option<String>,
+        webhook_error_at: Option<chrono::DateTime<chrono::Utc>>,
     }
     let row = sqlx::query_as::<_, BuilderRow>(
         "SELECT id, slug, title, description, version, schema, is_quiz, \
                 open_at, close_at, allow_edits, single_submission, passing_score, \
                 require_verified, min_account_age_days, success_message, preview_token, \
                 webhook_url, archived, \
-                max_attempts, retry_cooldown_seconds, retry_policy, lock_on_pass \
+                max_attempts, retry_cooldown_seconds, retry_policy, lock_on_pass, \
+                webhook_error, webhook_error_at \
          FROM forms WHERE id = $1 AND guild_id = $2",
     )
     .bind(uuid)
@@ -699,6 +702,17 @@ pub async fn builder_data(
     .fetch_one(&state.pool)
     .await?;
 
+    // A stored URL that cannot work says so from its shape alone, before any
+    // submission tries it; otherwise the last refusal, if there is one.
+    let (webhook_problem, webhook_problem_at) = match row
+        .webhook_url
+        .as_deref()
+        .and_then(webhook::discord_url_problem)
+    {
+        Some(problem) => (Some(problem.to_string()), None),
+        None => (row.webhook_error, row.webhook_error_at),
+    };
+
     Ok(Json(json!({
         "id": row.id.to_string(),
         "slug": row.slug,
@@ -717,6 +731,8 @@ pub async fn builder_data(
         "success_message": row.success_message,
         "preview_token": row.preview_token,
         "webhook_url": row.webhook_url,
+        "webhook_problem": webhook_problem,
+        "webhook_problem_at": webhook_problem_at.map(|t| t.to_rfc3339()),
         "archived": row.archived,
         "max_attempts": row.max_attempts,
         "retry_cooldown_seconds": row.retry_cooldown_seconds,
@@ -837,6 +853,9 @@ pub async fn update_form(
                 "webhook_url must be an https:// URL on a public host.".into(),
             ));
         }
+        if let Some(problem) = webhook::discord_url_problem(url) {
+            return Err(AppError::BadRequest(problem.into()));
+        }
     }
 
     // Retry / cooldown validation. `max_attempts`: 0 = unlimited, 1 = single
@@ -883,6 +902,10 @@ pub async fn update_form(
             success_message = $12, webhook_url = $13, archived = $14, \
             max_attempts = $15, retry_cooldown_seconds = $16, retry_policy = $17, \
             lock_on_pass = $18, \
+            webhook_error = CASE WHEN webhook_url IS DISTINCT FROM $13 THEN NULL \
+                                 ELSE webhook_error END, \
+            webhook_error_at = CASE WHEN webhook_url IS DISTINCT FROM $13 THEN NULL \
+                                    ELSE webhook_error_at END, \
             version = version + 1, updated_at = now() \
          WHERE id = $19 AND guild_id = $20 AND version = $21",
     )

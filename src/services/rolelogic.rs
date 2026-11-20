@@ -65,6 +65,27 @@ fn parse_user_limit(body: &str) -> Option<usize> {
     digits.parse().ok()
 }
 
+/// Pause before each resend of an idempotent request; its length is the
+/// number of resends.
+const RESEND_BACKOFF: [Duration; 2] = [Duration::from_millis(500), Duration::from_secs(2)];
+
+/// A send that failed before RoleLogic answered: the connection was refused
+/// or reset, DNS or TLS failed. Prod 2026-11-11 lost an add to one of these
+/// ("error sending request for url"), and the player_sync job that made it
+/// still completed. A timeout is excluded: the request may still be running
+/// there, and the 30 s already spent is the worst case to repeat.
+fn send_failed_transiently(e: &reqwest::Error) -> bool {
+    e.is_request() && !e.is_timeout()
+}
+
+/// An answer from the edge rather than from RoleLogic: Cloudflare or the
+/// tunnel could not reach the API, or it was restarting. Besides 502–504 that
+/// is Cloudflare's own 520–523 and 530. 524 is left out for the reason a
+/// timeout is: the API may still be running the request.
+fn edge_unavailable(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 502..=504 | 520..=523 | 530)
+}
+
 #[derive(Clone)]
 pub struct RoleLogicClient {
     http: reqwest::Client,
@@ -84,6 +105,33 @@ impl RoleLogicClient {
         }
     }
 
+    /// Send a request that is safe to repeat, resending it while the failure
+    /// is the connection's or the edge's rather than RoleLogic's answer. The
+    /// single-user writes qualify: adding a user already on the list answers
+    /// `added: false`, removing one already gone answers `removed: false`.
+    async fn send_idempotent(
+        &self,
+        build: impl Fn() -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, reqwest::Error> {
+        let mut resends = RESEND_BACKOFF.iter();
+        loop {
+            let result = build().send().await;
+            let cause = match &result {
+                Ok(resp) if edge_unavailable(resp.status()) => resp.status().to_string(),
+                Err(e) if send_failed_transiently(e) => e.to_string(),
+                _ => return result,
+            };
+            let Some(&wait) = resends.next() else {
+                return result;
+            };
+            tracing::warn!(
+                wait_ms = wait.as_millis() as u64,
+                "RoleLogic request failed before an answer, resending: {cause}"
+            );
+            tokio::time::sleep(wait).await;
+        }
+    }
+
     pub async fn add_user(
         &self,
         guild_id: &str,
@@ -97,10 +145,11 @@ impl RoleLogicClient {
         );
 
         let resp = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Token {token}"))
-            .send()
+            .send_idempotent(|| {
+                self.http
+                    .post(&url)
+                    .header("Authorization", format!("Token {token}"))
+            })
             .await
             .map_err(|e| AppError::RoleLogic(e.to_string()))?;
 
@@ -150,10 +199,11 @@ impl RoleLogicClient {
         );
 
         let resp = self
-            .http
-            .delete(&url)
-            .header("Authorization", format!("Token {token}"))
-            .send()
+            .send_idempotent(|| {
+                self.http
+                    .delete(&url)
+                    .header("Authorization", format!("Token {token}"))
+            })
             .await
             .map_err(|e| AppError::RoleLogic(e.to_string()))?;
 
@@ -474,6 +524,23 @@ mod tests {
     const DISABLED: &str = r#"{"errors":"This role link is disabled","requestId":"r"}"#;
     const GONE: &str = r#"{"errors":"Invalid or revoked token","requestId":"r"}"#;
     const HELD: &str = r#"{"errors":{"error":"confirm_required","code":"shrink","change_id":"c","previous":2,"next":0,"removals":2}}"#;
+
+    #[test]
+    fn edge_failures_are_resent_and_answers_are_not() {
+        for code in [502, 503, 504, 520, 521, 522, 523, 530] {
+            assert!(
+                edge_unavailable(StatusCode::from_u16(code).unwrap()),
+                "{code}"
+            );
+        }
+        // 524: the API may still be running it. The rest are RoleLogic's answer.
+        for code in [400, 403, 404, 409, 429, 500, 524] {
+            assert!(
+                !edge_unavailable(StatusCode::from_u16(code).unwrap()),
+                "{code}"
+            );
+        }
+    }
 
     #[test]
     fn paused_and_disabled_links_are_inactive() {

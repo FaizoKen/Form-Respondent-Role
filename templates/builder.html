@@ -844,6 +844,8 @@ main {
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
 .toast.success { background: var(--success-bg); color: var(--success-text); border-color: var(--success-border); }
 .toast.warn { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-border); }
+.webhook-problem { margin-top: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.45; background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); border-radius: 6px; }
+.webhook-problem[hidden] { display: none; }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modalIn { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -1067,6 +1069,7 @@ main {
       <label>Discord webhook URL <span style="text-transform:none;font-weight:400;color:var(--text-faint);">(optional)</span></label>
       <input id="s-webhook-url" type="url" placeholder="https://discord.com/api/webhooks/...">
       <p class="muted" style="margin-top:6px;">Posts a message to your Discord channel each time the form is submitted.</p>
+      <p id="s-webhook-problem" class="webhook-problem" role="alert" hidden></p>
 
       <hr style="border:none;border-top:1px solid var(--border);margin:18px 0;">
 
@@ -1246,6 +1249,7 @@ async function load() {
       return;
     }
     state = await res.json();
+    savedWebhookUrl = state.webhook_url || '';
     if (!state.schema || !state.schema.pages) state.schema = { title: state.title, pages: [{id: rid('p'), title: 'Page 1', questions: []}] };
     const titleInput = document.getElementById('title-input');
     titleInput.value = state.title || '';
@@ -1259,6 +1263,23 @@ async function load() {
     render();
   } catch (e) { showToast(e.message); }
 }
+
+// The webhook URL as last saved. The server's note on it (`webhook_problem`)
+// is about that URL, so it hides while the field holds an edit; the save
+// checks the new one.
+let savedWebhookUrl = '';
+function showWebhookProblem() {
+  const el = document.getElementById('s-webhook-problem');
+  const unchanged = (document.getElementById('s-webhook-url').value || '') === savedWebhookUrl;
+  const problem = unchanged ? state.webhook_problem : null;
+  let text = problem || '';
+  if (problem && state.webhook_problem_at) {
+    text += ' (Last failed ' + new Date(state.webhook_problem_at).toLocaleString() + '.)';
+  }
+  el.textContent = text;
+  el.hidden = !problem;
+}
+document.getElementById('s-webhook-url').addEventListener('input', showWebhookProblem);
 
 function fillSettingsModal() {
   const s = state.schema.settings || {};
@@ -1278,6 +1299,7 @@ function fillSettingsModal() {
   document.getElementById('s-min-age').value = state.min_account_age_days || 0;
   document.getElementById('s-success-msg').value = state.success_message || 'Thanks for your response!';
   document.getElementById('s-webhook-url').value = state.webhook_url || '';
+  showWebhookProblem();
   document.getElementById('s-archived').checked = !!state.archived;
   // Retries: max_attempts defaults to 1 (single submission). Pick the
   // largest whole time unit for the cooldown so e.g. 7200s shows as "2 hours".
@@ -1992,6 +2014,13 @@ async function save() {
       return;
     }
     state.version = data.version;
+    // Saving a different URL clears the server's note on the old one.
+    if ((body.webhook_url || '') !== savedWebhookUrl) {
+      state.webhook_problem = null;
+      state.webhook_problem_at = null;
+    }
+    savedWebhookUrl = body.webhook_url || '';
+    showWebhookProblem();
     markSaved();
     btn.disabled = false;
     updateFormUrl();

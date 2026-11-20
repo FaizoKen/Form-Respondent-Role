@@ -12,6 +12,7 @@ use serde_json::Value;
 use crate::error::AppError;
 use crate::services::jobs::{self, Job, JobKind, PlayerSyncPayload};
 use crate::services::sync;
+use crate::services::webhook;
 use crate::tasks::shutdown::ShutdownGuard;
 use crate::AppState;
 
@@ -98,6 +99,14 @@ pub async fn run(state: Arc<AppState>, mut shutdown: ShutdownGuard, worker_id: S
                         tracing::error!(job_id, kind = %kind_for_log, "Job dead (terminal): {msg}");
                         let _ = jobs::fail_dead(&state.pool, job_id, &msg).await;
                     }
+                    JobError::OwnerFixable(msg) => {
+                        tracing::warn!(
+                            job_id,
+                            kind = %kind_for_log,
+                            "Job dead, the form's owner is shown why in the builder: {msg}"
+                        );
+                        let _ = jobs::fail_dead(&state.pool, job_id, &msg).await;
+                    }
                     JobError::Retry(msg) => {
                         if job.attempts >= job.max_attempts {
                             tracing::error!(
@@ -131,6 +140,11 @@ pub async fn run(state: Arc<AppState>, mut shutdown: ShutdownGuard, worker_id: S
 enum JobError {
     Terminal(String),
     Retry(String),
+    /// Terminal, for a reason the form's owner can fix and has been shown
+    /// (a deleted webhook, a channel link pasted as one). Logged at warn: it
+    /// is their endpoint, not a fault here, and it used to page the operator
+    /// once per submission.
+    OwnerFixable(String),
 }
 
 impl From<AppError> for JobError {
@@ -188,16 +202,21 @@ async fn dispatch(job: &Job, state: &AppState) -> Result<(), JobError> {
                 .get("body")
                 .cloned()
                 .ok_or_else(|| JobError::Terminal("webhook payload missing body".into()))?;
-            crate::services::webhook::deliver_once(&state.http, url, &body)
-                .await
-                .map_err(|reason| {
-                    // The webhook delivery layer classifies its own errors.
-                    if reason.terminal {
+            // The webhook delivery layer classifies its own errors.
+            match webhook::deliver_once(&state.http, url, &body).await {
+                Ok(()) => webhook::record_delivery(&state.pool, url).await,
+                Err(reason) => {
+                    if let Some(notice) = &reason.owner_notice {
+                        webhook::record_refusal(&state.pool, url, notice).await;
+                        return Err(JobError::OwnerFixable(reason.message));
+                    }
+                    return Err(if reason.terminal {
                         JobError::Terminal(reason.message)
                     } else {
                         JobError::Retry(reason.message)
-                    }
-                })?;
+                    });
+                }
+            }
         }
     }
     Ok(())

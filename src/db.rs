@@ -77,6 +77,10 @@ pub async fn run_migrations(pool: &PgPool) {
             "011",
             include_str!("../migrations/011_response_display_name.sql"),
         ),
+        (
+            "012",
+            include_str!("../migrations/012_form_webhook_error.sql"),
+        ),
     ];
     for (id, sql) in migrations {
         sqlx::raw_sql(sql)

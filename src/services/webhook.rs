@@ -22,6 +22,122 @@ pub struct WebhookFailure {
     pub message: String,
     /// `true` → drop into DLQ immediately. `false` → backoff + retry.
     pub terminal: bool,
+    /// What the form's owner should be told, when the destination refused
+    /// the delivery for a reason only they can fix (the webhook was deleted,
+    /// the URL is not a webhook). The builder shows it under the URL field.
+    pub owner_notice: Option<String>,
+}
+
+/// Shown for a Discord URL that is not a webhook.
+const NOT_A_WEBHOOK: &str = "This is a Discord link, but not a webhook URL, so nothing \
+     would be posted. In Discord, open the channel's settings, go to Integrations → \
+     Webhooks, create a webhook and paste its URL here (it starts with \
+     https://discord.com/api/webhooks/).";
+
+fn is_discord_host(host: &str) -> bool {
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    matches!(
+        host,
+        "discord.com"
+            | "discordapp.com"
+            | "ptb.discord.com"
+            | "canary.discord.com"
+            | "ptb.discordapp.com"
+            | "canary.discordapp.com"
+            | "discord.gg"
+    )
+}
+
+/// Why a Discord URL cannot take a webhook post; `None` for a webhook URL and
+/// for any URL that is not Discord's.
+///
+/// Discord answers a POST to a channel link or an invite with its web app and
+/// a 200, so a pasted channel link looked delivered while nothing was posted
+/// (prod, Nov 2026: 6 forms, 36 submissions "delivered" to nowhere).
+pub fn discord_url_problem(url: &str) -> Option<&'static str> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    if !is_discord_host(&host) {
+        return None;
+    }
+    let segments: Vec<&str> = parsed
+        .path_segments()
+        .map(|s| s.filter(|p| !p.is_empty()).collect())
+        .unwrap_or_default();
+    let rest = match segments.as_slice() {
+        ["api", "webhooks", rest @ ..] => rest,
+        ["api", version, "webhooks", rest @ ..]
+            if version
+                .strip_prefix('v')
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) =>
+        {
+            rest
+        }
+        _ => return Some(NOT_A_WEBHOOK),
+    };
+    match rest {
+        [id, _token, ..] if id.bytes().all(|b| b.is_ascii_digit()) => None,
+        _ => Some(NOT_A_WEBHOOK),
+    }
+}
+
+/// What to tell the owner about a refusal they can fix; `None` when the
+/// failure may be ours (a 400 on our payload) or may pass.
+fn refusal_notice(url: &str, status: reqwest::StatusCode) -> Option<String> {
+    let discord = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| {
+            u.host_str()
+                .map(|h| is_discord_host(&h.to_ascii_lowercase()))
+        })
+        .unwrap_or(false);
+    match status.as_u16() {
+        404 | 410 if discord => Some(
+            "Discord says this webhook no longer exists, so submissions are not being \
+             posted. Create a new webhook in the channel's settings (Integrations → \
+             Webhooks) and paste its URL here."
+                .into(),
+        ),
+        401 | 403 if discord => Some(
+            "Discord refused this webhook's token, so submissions are not being posted. \
+             Copy the webhook URL from Discord again and paste it here."
+                .into(),
+        ),
+        401 | 403 | 404 | 410 => Some(format!(
+            "The webhook URL answered {status}, so submissions are not reaching it. \
+             Check the URL."
+        )),
+        _ => None,
+    }
+}
+
+/// Note on every form using `url` that its webhook refused a delivery.
+pub async fn record_refusal(pool: &sqlx::PgPool, url: &str, notice: &str) {
+    if let Err(e) = sqlx::query(
+        "UPDATE forms SET webhook_error = $2, webhook_error_at = now() WHERE webhook_url = $1",
+    )
+    .bind(url)
+    .bind(notice)
+    .execute(pool)
+    .await
+    {
+        tracing::warn!("Could not record a webhook refusal: {e}");
+    }
+}
+
+/// Clear an earlier refusal once a delivery to `url` goes through. Matches
+/// no row in the common case, so it writes nothing.
+pub async fn record_delivery(pool: &sqlx::PgPool, url: &str) {
+    if let Err(e) = sqlx::query(
+        "UPDATE forms SET webhook_error = NULL, webhook_error_at = NULL \
+         WHERE webhook_url = $1 AND webhook_error IS NOT NULL",
+    )
+    .bind(url)
+    .execute(pool)
+    .await
+    {
+        tracing::warn!("Could not clear a webhook refusal: {e}");
+    }
 }
 
 /// One delivery attempt. Used by the job worker; callers MUST NOT call this
@@ -36,6 +152,14 @@ pub async fn deliver_once(
         return Err(WebhookFailure {
             message: "URL rejected: must be https with a public host".into(),
             terminal: true,
+            owner_notice: None,
+        });
+    }
+    if let Some(problem) = discord_url_problem(url) {
+        return Err(WebhookFailure {
+            message: "not a Discord webhook URL".into(),
+            terminal: true,
+            owner_notice: Some(problem.into()),
         });
     }
     // Pre-flight: resolve the host ourselves and check each resolved IP.
@@ -50,6 +174,7 @@ pub async fn deliver_once(
             // become safe on retry.
             terminal: reason == "resolved to a private or loopback address",
             message: format!("DNS check: {reason}"),
+            owner_notice: None,
         });
     }
 
@@ -65,6 +190,7 @@ pub async fn deliver_once(
             return Err(WebhookFailure {
                 message: format!("request failed: {e}"),
                 terminal: false,
+                owner_notice: None,
             });
         }
     };
@@ -81,6 +207,7 @@ pub async fn deliver_once(
     Err(WebhookFailure {
         message: format!("webhook returned {status}"),
         terminal,
+        owner_notice: refusal_notice(url, status),
     })
 }
 
@@ -233,6 +360,73 @@ mod tests {
         assert!(!is_safe_url("javascript:alert(1)"));
         assert!(!is_safe_url("file:///etc/passwd"));
         assert!(!is_safe_url("ftp://example.com"));
+    }
+
+    // ---------- discord_url_problem (pasted links that are not webhooks) ----------
+
+    #[test]
+    fn discord_webhook_urls_are_accepted() {
+        for url in [
+            "https://discord.com/api/webhooks/123456789012345678/abc-DEF_123",
+            "https://discordapp.com/api/webhooks/1/x",
+            "https://ptb.discord.com/api/v10/webhooks/1/x",
+            "https://canary.discord.com/api/webhooks/1/x/",
+            "https://discord.com/api/webhooks/1/x?wait=true",
+        ] {
+            assert_eq!(discord_url_problem(url), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn discord_links_that_are_not_webhooks_are_refused() {
+        // The shapes found in prod: a channel link and an invite.
+        for url in [
+            "https://discord.com/channels/111111111111111111/222222222222222222",
+            "https://discord.gg/AbCdEf",
+            "https://www.discord.com/invite/abc",
+            "https://discord.com/api/webhooks/123456789012345678",
+            "https://discord.com/api/webhooks/not-an-id/token",
+            "https://discord.com/api/vX/webhooks/1/x",
+            "https://discord.com/",
+        ] {
+            assert!(discord_url_problem(url).is_some(), "{url}");
+        }
+    }
+
+    #[test]
+    fn other_hosts_are_left_alone() {
+        assert_eq!(
+            discord_url_problem("https://hooks.zapier.com/hooks/catch/1/x"),
+            None
+        );
+        assert_eq!(
+            discord_url_problem("https://notdiscord.com/channels/1"),
+            None
+        );
+        assert_eq!(discord_url_problem("not a url"), None);
+    }
+
+    // ---------- refusal_notice (what the form's owner is told) ----------
+
+    #[test]
+    fn a_deleted_or_rejected_discord_webhook_is_explained() {
+        let url = "https://discord.com/api/webhooks/1/x";
+        let gone = refusal_notice(url, reqwest::StatusCode::NOT_FOUND).unwrap();
+        assert!(gone.contains("no longer exists"), "{gone}");
+        let token = refusal_notice(url, reqwest::StatusCode::UNAUTHORIZED).unwrap();
+        assert!(token.contains("token"), "{token}");
+    }
+
+    #[test]
+    fn a_refusal_that_may_be_ours_or_may_pass_is_not_blamed_on_the_owner() {
+        let url = "https://discord.com/api/webhooks/1/x";
+        for status in [400, 408, 429, 500, 502] {
+            let status = reqwest::StatusCode::from_u16(status).unwrap();
+            assert_eq!(refusal_notice(url, status), None, "{status}");
+        }
+        // Another host gets the plain version.
+        let other = refusal_notice("https://example.com/hook", reqwest::StatusCode::GONE).unwrap();
+        assert!(other.contains("410"), "{other}");
     }
 
     // ---------- is_safe_ip (post-resolution check) ----------
